@@ -101,7 +101,7 @@ const REDIS_CACHE_TTL_SECONDS = 15;
 - Redis 没有 username 时，`REDIS_USERNAME` 留空。
 - Redis 没有 password 时，`REDIS_PASSWORD` 留空。
 - 只有填写了密码才会执行 Redis auth。
-- 如果 Redis 扩展未安装、连接失败或认证失败，程序会继续使用 MySQL。
+- 如果 PHP Redis 扩展未安装、Redis 连接失败或认证失败，程序会继续使用 MySQL。
 
 ## 主要功能
 

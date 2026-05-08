@@ -368,6 +368,7 @@ try {
 
         $pdo->commit();
         latest_locations_cache_forget_all();
+        latest_locations_for_group((string) $membership['group_name']);
 
         json_response([
             'ok' => true,
@@ -469,6 +470,7 @@ try {
 
     $pdo->commit();
     latest_locations_cache_forget_all();
+    latest_locations_for_group((string) $membership['group_name']);
 
     json_response([
         'ok' => true,

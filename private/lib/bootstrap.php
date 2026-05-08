@@ -74,7 +74,7 @@ function redis_client()
         }
 
         $db = max(0, (int) REDIS_DB);
-        if ($db > 0 && !$client->select($db)) {
+        if (!$client->select($db)) {
             throw new RuntimeException('Redis select db failed.');
         }
 
