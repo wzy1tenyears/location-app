@@ -367,6 +367,7 @@ try {
         ]);
 
         $pdo->commit();
+        latest_locations_cache_forget_all();
 
         json_response([
             'ok' => true,
@@ -467,6 +468,7 @@ try {
     ');
 
     $pdo->commit();
+    latest_locations_cache_forget_all();
 
     json_response([
         'ok' => true,

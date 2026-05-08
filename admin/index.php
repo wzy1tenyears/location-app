@@ -607,6 +607,10 @@ try {
             $pdo->commit();
             $message = '定位记录已删除。';
         }
+
+        if ($message !== '') {
+            latest_locations_cache_forget_all();
+        }
     }
 
     $familyGroupsStmt = $pdo->query('

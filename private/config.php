@@ -16,6 +16,13 @@ const DB_USER = 'loc';
 const DB_PASS = 'loc';
 const DB_CHARSET = 'utf8mb4';
 
+const REDIS_HOST = '127.0.0.1';
+const REDIS_PORT = 6379;
+const REDIS_DB = 0;
+const REDIS_USERNAME = '';
+const REDIS_PASSWORD = '';
+const REDIS_CACHE_TTL_SECONDS = 15;
+
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = 'password';
 const ADMIN_PATH = 'admin';

@@ -37,6 +37,134 @@ function db(): PDO
     return $pdo;
 }
 
+function redis_client()
+{
+    static $redis = null;
+    static $disabled = false;
+
+    if ($disabled) {
+        return null;
+    }
+
+    if ($redis instanceof Redis) {
+        return $redis;
+    }
+
+    if (!redis_cache_configured() || !class_exists('Redis')) {
+        $disabled = true;
+        return null;
+    }
+
+    try {
+        $client = new Redis();
+        if (!$client->connect((string) REDIS_HOST, (int) REDIS_PORT, 1.0)) {
+            throw new RuntimeException('Redis connect failed.');
+        }
+
+        $redisUsername = trim((string) REDIS_USERNAME);
+        $redisPassword = (string) REDIS_PASSWORD;
+        if ($redisUsername !== '' && $redisPassword !== '') {
+            if (!$client->auth([$redisUsername, $redisPassword])) {
+                throw new RuntimeException('Redis auth failed.');
+            }
+        } elseif ($redisPassword !== '') {
+            if (!$client->auth($redisPassword)) {
+                throw new RuntimeException('Redis auth failed.');
+            }
+        }
+
+        $db = max(0, (int) REDIS_DB);
+        if ($db > 0 && !$client->select($db)) {
+            throw new RuntimeException('Redis select db failed.');
+        }
+
+        $redis = $client;
+        return $redis;
+    } catch (Throwable $error) {
+        error_log('[family-location] Redis disabled: ' . $error->getMessage());
+        $disabled = true;
+        return null;
+    }
+}
+
+function redis_cache_configured(): bool
+{
+    return defined('REDIS_HOST')
+        && defined('REDIS_PORT')
+        && defined('REDIS_DB')
+        && defined('REDIS_USERNAME')
+        && defined('REDIS_PASSWORD')
+        && trim((string) REDIS_HOST) !== ''
+        && (int) REDIS_PORT > 0
+        && (int) REDIS_DB >= 0;
+}
+
+function redis_cache_prefix(): string
+{
+    return 'family_location:' . hash('sha256', DB_NAME) . ':';
+}
+
+function latest_locations_cache_version(): string
+{
+    $redis = redis_client();
+    if (!$redis) {
+        return '0';
+    }
+
+    $version = $redis->get(redis_cache_prefix() . 'latest_locations_version');
+    return is_string($version) && $version !== '' ? $version : '0';
+}
+
+function latest_locations_cache_key(string $groupName): string
+{
+    return redis_cache_prefix()
+        . 'latest_locations:'
+        . latest_locations_cache_version()
+        . ':'
+        . hash('sha256', $groupName);
+}
+
+function latest_locations_cache_get(string $groupName): ?array
+{
+    $redis = redis_client();
+    if (!$redis) {
+        return null;
+    }
+
+    $payload = $redis->get(latest_locations_cache_key($groupName));
+    if (!is_string($payload) || $payload === '') {
+        return null;
+    }
+
+    $decoded = json_decode($payload, true);
+    return is_array($decoded) ? $decoded : null;
+}
+
+function latest_locations_cache_set(string $groupName, array $locations): void
+{
+    $redis = redis_client();
+    if (!$redis) {
+        return;
+    }
+
+    $ttl = max(1, (int) (defined('REDIS_CACHE_TTL_SECONDS') ? REDIS_CACHE_TTL_SECONDS : 15));
+    $redis->setex(
+        latest_locations_cache_key($groupName),
+        $ttl,
+        json_encode($locations, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+    );
+}
+
+function latest_locations_cache_forget_all(): void
+{
+    $redis = redis_client();
+    if (!$redis) {
+        return;
+    }
+
+    $redis->incr(redis_cache_prefix() . 'latest_locations_version');
+}
+
 function ensure_schema(PDO $pdo): void
 {
     static $done = false;
@@ -749,6 +877,11 @@ function clear_failed_login(PDO $pdo, int $userId): void
 
 function latest_locations_for_group(string $groupName): array
 {
+    $cached = latest_locations_cache_get($groupName);
+    if (is_array($cached)) {
+        return $cached;
+    }
+
     $stmt = db()->prepare("
         SELECT
             ll.user_id,
@@ -776,6 +909,8 @@ function latest_locations_for_group(string $groupName): array
     foreach ($stmt->fetchAll() as $row) {
         $locations[] = location_payload($row);
     }
+
+    latest_locations_cache_set($groupName, $locations);
 
     return $locations;
 }

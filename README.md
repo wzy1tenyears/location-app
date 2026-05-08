@@ -28,6 +28,7 @@ private/config.php
 至少需要确认这些配置：
 
 - MySQL 数据库地址、库名、账号和密码
+- Redis 地址、端口、DB 和可选认证信息
 - 后台登录账号和密码
 - 后台访问路径 `ADMIN_PATH`
 - 后台源码目录 `ADMIN_SOURCE_DIR`
@@ -78,6 +79,29 @@ https://example.com/
 5. 将 `nginx-location.conf` 的规则放入对应站点的 `server { ... }` 中。
 6. 确认 `/private/` 不能被公网访问。
 7. 使用 Android 客户端访问网站根目录。
+
+## Redis 缓存
+
+项目支持可选 Redis 缓存，用于加速家庭组最新位置列表读取。Redis 不可用时会自动回退 MySQL，不影响原有逻辑。
+
+配置位置：
+
+```php
+const REDIS_HOST = '127.0.0.1';
+const REDIS_PORT = 6379;
+const REDIS_DB = 0;
+const REDIS_USERNAME = '';
+const REDIS_PASSWORD = '';
+const REDIS_CACHE_TTL_SECONDS = 15;
+```
+
+说明：
+
+- `REDIS_DB` 可以改成你想使用的 Redis 数据库编号。
+- Redis 没有 username 时，`REDIS_USERNAME` 留空。
+- Redis 没有 password 时，`REDIS_PASSWORD` 留空。
+- 只有填写了密码才会执行 Redis auth。
+- 如果 Redis 扩展未安装、连接失败或认证失败，程序会继续使用 MySQL。
 
 ## 主要功能
 
