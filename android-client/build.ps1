@@ -76,8 +76,8 @@ $LinkArgs = @(
     "-A", (Join-Path $ProjectRoot "assets"),
     "--min-sdk-version", "23",
     "--target-sdk-version", "35",
-    "--version-code", "21",
-    "--version-name", "1.1.6",
+    "--version-code", "1",
+    "--version-name", "1.0.0",
     "-o", $UnsignedApk,
     "--auto-add-overlay"
 )

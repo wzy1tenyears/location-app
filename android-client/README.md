@@ -23,13 +23,3 @@
 ```text
 android-client\build\FamilyLocation-debug.apk
 ```
-
-## 服务器地址
-
-发布版不内置服务器地址。App 首次打开会要求输入服务器地址，例如：
-
-```text
-https://example.com/
-```
-
-手机定位建议必须使用 HTTPS。
