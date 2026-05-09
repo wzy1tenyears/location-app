@@ -298,7 +298,6 @@ function showMain(user) {
     refreshHistory();
     syncAutoReportWatch();
     checkFineLocationPermission();
-    uploadEnvironmentDataIfAllowed();
 }
 
 function preferredGroupName(user) {
@@ -533,41 +532,6 @@ function showPreciseLocationRequiredPopup(requestAgain = true) {
     });
 }
 
-async function uploadEnvironmentDataIfAllowed() {
-    if (!state.user || !state.user.environment_data_consent || !window.LocationBridge) {
-        return;
-    }
-
-    const today = localDateKey();
-    const storageKey = `environment_reported_day_${state.user.id}`;
-    if (window.localStorage.getItem(storageKey) === today) {
-        return;
-    }
-
-    if (typeof window.LocationBridge.getEnvironmentData !== 'function') {
-        return;
-    }
-
-    try {
-        const raw = window.LocationBridge.getEnvironmentData();
-        const report = JSON.parse(raw || '{}');
-        await api('environment_report', {
-            method: 'POST',
-            body: JSON.stringify({ report }),
-        });
-        window.localStorage.setItem(storageKey, today);
-    } catch (error) {
-        console.warn(error);
-    }
-}
-
-function localDateKey(date = new Date()) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
-
 function openSettingsPopup() {
     const overlay = document.createElement('div');
     overlay.className = 'popup-select-overlay';
@@ -603,38 +567,7 @@ function openSettingsPopup() {
     themeSelect.addEventListener('change', () => applyThemeMode(themeSelect.value));
     themeLabel.append(themeTitle, themeSelect);
 
-    const envLabel = document.createElement('label');
-    envLabel.className = 'settings-check-field';
-    const envInput = document.createElement('input');
-    envInput.type = 'checkbox';
-    envInput.checked = !!(state.user && state.user.environment_data_consent);
-    const envText = document.createElement('span');
-    envText.textContent = '同意上报环境数据用于改进软件';
-    envInput.addEventListener('change', async () => {
-        const checked = envInput.checked;
-        envInput.disabled = true;
-        try {
-            const payload = await api('settings', {
-                method: 'POST',
-                body: JSON.stringify({
-                    group_name: state.selectedGroupName,
-                    environment_data_consent: checked,
-                }),
-            });
-            state.user = payload.user;
-            if (checked) {
-                uploadEnvironmentDataIfAllowed();
-            }
-        } catch (error) {
-            envInput.checked = !checked;
-            showSimplePopup('设置失败', error.message);
-        } finally {
-            envInput.disabled = false;
-        }
-    });
-    envLabel.append(envInput, envText);
-
-    body.append(themeLabel, envLabel);
+    body.append(themeLabel);
 
     const actions = document.createElement('div');
     actions.className = 'popup-dialog-actions';
@@ -2584,9 +2517,6 @@ el.loginForm.addEventListener('submit', async (event) => {
         });
 
         el.password.value = '';
-        if (!payload.user && !payload.redirect) {
-            return;
-        }
         if (payload.redirect) {
             window.location.href = payload.redirect;
             return;
