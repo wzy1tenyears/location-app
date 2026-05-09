@@ -473,6 +473,7 @@ select:focus {
 
 .leaflet-popup-content {
     color: var(--ink) !important;
+    margin: 10px 12px !important;
 }
 
 .leaflet-popup-close-button {
@@ -498,6 +499,40 @@ select:focus {
 .amap-popup-content {
     color: var(--ink);
     line-height: 1.6;
+}
+
+.location-map-popup .leaflet-popup-content,
+.amap-popup-content {
+    min-width: 190px;
+    max-width: 260px;
+}
+
+.map-popup {
+    display: grid;
+    gap: 4px;
+    line-height: 1.35;
+    text-align: left;
+}
+
+.map-popup-title {
+    font-size: 15px;
+    font-weight: 850;
+    text-align: center;
+}
+
+.map-popup-row {
+    font-size: 13px;
+    text-align: center;
+}
+
+.map-popup-coord {
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+    line-height: 1.4;
+    margin-top: 2px;
+    overflow-wrap: anywhere;
+    padding-top: 6px;
+    text-align: left;
 }
 
 .location-grid {

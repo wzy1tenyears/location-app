@@ -135,23 +135,23 @@ function refreshPopupSelectControls() {
     }
 }
 
-function showDocumentPopup(title, sections) {
+function showDocumentPopup(title, sections, options = {}) {
     if (typeof window.showPopupDialog === 'function') {
-        window.showPopupDialog({ title, sections });
+        window.showPopupDialog({ title, sections, ...options });
         return;
     }
 
-    openInlinePopupDialog(title, sections);
+    openInlinePopupDialog(title, sections, options);
 }
 
-function showSimplePopup(title, paragraphs) {
+function showSimplePopup(title, paragraphs, options = {}) {
     showDocumentPopup(title, [{
         title: '',
         paragraphs: Array.isArray(paragraphs) ? paragraphs : [String(paragraphs || '')],
-    }]);
+    }], options);
 }
 
-function openInlinePopupDialog(title, sections) {
+function openInlinePopupDialog(title, sections, options = {}) {
     const overlay = document.createElement('div');
     overlay.className = 'popup-select-overlay';
 
@@ -187,9 +187,18 @@ function openInlinePopupDialog(title, sections) {
     closeButton.type = 'button';
     closeButton.textContent = '关闭';
 
+    let closed = false;
     function close() {
+        if (closed) {
+            return;
+        }
+
+        closed = true;
         overlay.classList.remove('is-visible');
         window.setTimeout(() => overlay.remove(), 200);
+        if (typeof options.onClose === 'function') {
+            window.setTimeout(options.onClose, 210);
+        }
     }
 
     closeButton.addEventListener('click', close);
@@ -497,7 +506,7 @@ function checkFineLocationPermission() {
 
     try {
         if (window.LocationBridge.hasFineLocationPermission() !== true) {
-            showPreciseLocationRequiredPopup(false);
+            showPreciseLocationRequiredPopup(true);
         }
     } catch (error) {
         console.warn(error);
@@ -518,11 +527,9 @@ function showPreciseLocationRequiredPopup(requestAgain = true) {
     showSimplePopup('需要定位权限', [
         '请开启“始终允许定位”，并启用“精确位置”。否则持续上报、手动上报和地图定位可能无法正常工作。',
         '如果系统已经拒绝过权限，请到系统设置里的应用权限中手动开启。',
-    ]);
-
-    if (requestAgain) {
-        requestFineLocationPermissionAgain();
-    }
+    ], {
+        onClose: requestAgain ? requestFineLocationPermissionAgain : null,
+    });
 }
 
 function openSettingsPopup() {
@@ -1440,7 +1447,7 @@ function renderHistoryMap(records, adjustViewport = true) {
 
             const marker = L.marker(latLng, {
                 icon: historyMarkerIcon(location, selected, color),
-            }).bindPopup(popup);
+            }).bindPopup(popup, mapPopupOptions());
 
             marker.on('click', () => selectHistory(location.id));
             marker.addTo(state.historyLayer);
@@ -1780,15 +1787,56 @@ function reuseIpProbeResultForWebRtc(webrtcSource, ipSource = window.__latestIpP
     const coordinates = sourceCoordinates(match) || sourceCoordinates(ipSource) || null;
     return {
         ...webrtcSource,
-        address: match.address || ipSource.address || webrtcSource.address,
-        city: ipSource.city || match.city || webrtcSource.city || '',
-        region: ipSource.region || match.region || webrtcSource.region || '',
-        country: ipSource.country || match.country || webrtcSource.country || '',
+        address: formatReusedWebRtcAddress(webrtcSource, match, ipSource),
+        city: match.city || ipSource.city || webrtcSource.city || '',
+        region: match.region || ipSource.region || webrtcSource.region || '',
+        country: match.country || ipSource.country || webrtcSource.country || '',
         latitude: coordinates ? coordinates.latitude : webrtcSource.latitude,
         longitude: coordinates ? coordinates.longitude : webrtcSource.longitude,
         reused_ip_probe: true,
         ip_probe_variant_label: match.label || '',
     };
+}
+
+function formatReusedWebRtcAddress(webrtcSource, match, ipSource) {
+    const parts = [match.address || ipSource.address || webrtcSource.address || webrtcSource.ip || ''];
+    const stunLabel = webrtcSource.stun_server
+        ? `${webrtcSource.stun_scope === 'cn' ? '国内 STUN' : '全球 STUN'} ${webrtcSource.stun_server}`
+        : '';
+
+    if (stunLabel) {
+        parts.push(stunLabel);
+    }
+
+    const candidateText = webRtcCandidateSummary(webrtcSource);
+    if (candidateText) {
+        parts.push(candidateText);
+    }
+
+    return parts.filter(Boolean).join(' / ');
+}
+
+function webRtcCandidateSummary(webrtcSource) {
+    if (!Array.isArray(webrtcSource.candidates)) {
+        return '';
+    }
+
+    const seen = new Set();
+    const candidates = webrtcSource.candidates
+        .filter((candidate) => candidate && candidate.ip)
+        .filter((candidate) => {
+            const key = `${candidate.ip}|${candidate.server || ''}`;
+            if (seen.has(key)) {
+                return false;
+            }
+
+            seen.add(key);
+            return true;
+        })
+        .slice(0, 5)
+        .map((candidate) => `${candidate.ip}${candidate.server ? `(${candidate.server})` : ''}`);
+
+    return candidates.length ? `候选：${candidates.join(', ')}` : '';
 }
 
 function findMatchingIpProbeResult(webrtcSource, ipSource) {
@@ -2116,8 +2164,7 @@ function renderMarkers(locations) {
         activeIds.add(location.user_id);
         const key = location.user_id;
         const latLng = mapLatLng(location);
-        const name = location.display_name || location.username;
-        const popup = `${escapeHtml(name)}<br>${escapeHtml(location.role_label)}<br>${escapeHtml(location.updated_at)}`;
+        const popup = latestPopupHtml(location);
         const color = userColor(location.user_id);
         const iconHtml = `<div class="marker-dot ${location.role}" style="--marker-color: ${escapeHtml(color)}">${escapeHtml(markerInitial(location))}</div>`;
 
@@ -2131,7 +2178,7 @@ function renderMarkers(locations) {
 
         const marker = L.marker(latLng, {
             icon: latestMarkerIcon(location, iconHtml),
-        }).bindPopup(popup);
+        }).bindPopup(popup, mapPopupOptions());
 
         marker.addTo(state.map);
         state.markers.set(key, marker);
@@ -2204,12 +2251,21 @@ function renderAmapMarkers(locations) {
 
 function latestPopupHtml(location) {
     const name = location.display_name || location.username;
-    return `${escapeHtml(name)}<br>${escapeHtml(location.role_label)}<br>${escapeHtml(location.updated_at)}`;
+    return `<div class="map-popup">
+        <div class="map-popup-title">${escapeHtml(name)}</div>
+        <div class="map-popup-row">${escapeHtml(location.role_label || '')}</div>
+        <div class="map-popup-row">${escapeHtml(location.updated_at || '')}</div>
+    </div>`;
 }
 
 function historyPopupHtml(location) {
     const name = location.display_name || location.username || '';
-    return `${escapeHtml(name)}<br>${escapeHtml(location.role_label || '')}<br>${escapeHtml(location.created_at || '')}<br>${escapeHtml(formatCoord(location))}`;
+    return `<div class="map-popup">
+        <div class="map-popup-title">${escapeHtml(name)}</div>
+        <div class="map-popup-row">${escapeHtml(location.role_label || '')}</div>
+        <div class="map-popup-row">${escapeHtml(location.created_at || '')}</div>
+        <div class="map-popup-coord">${escapeHtml(formatCoord(location))}</div>
+    </div>`;
 }
 
 function latestMarkerHtml(location) {
@@ -2227,6 +2283,15 @@ function openAmapInfoWindow(marker, html) {
 
     state.amapInfoWindow.setContent(`<div class="amap-popup-content">${html}</div>`);
     state.amapInfoWindow.open(state.map, marker.getPosition());
+}
+
+function mapPopupOptions() {
+    return {
+        className: 'location-map-popup',
+        minWidth: 190,
+        maxWidth: 260,
+        autoPanPadding: [16, 16],
+    };
 }
 
 function latestMarkerIcon(location, html = '') {

@@ -87,9 +87,10 @@
         }
     }
 
-    function openPopupDialog({ title, sections = [], closeText = '关闭' } = {}) {
+    function openPopupDialog({ title, sections = [], closeText = '关闭', onClose = null } = {}) {
         const overlay = document.createElement('div');
         overlay.className = 'popup-select-overlay';
+        let closed = false;
 
         const card = document.createElement('div');
         card.className = 'popup-select-card popup-dialog-card';
@@ -122,13 +123,25 @@
         const closeButton = document.createElement('button');
         closeButton.type = 'button';
         closeButton.textContent = closeText;
-        closeButton.addEventListener('click', () => closeOverlay(overlay));
+        function closeDialog() {
+            if (closed) {
+                return;
+            }
+
+            closed = true;
+            closeOverlay(overlay);
+            if (typeof onClose === 'function') {
+                window.setTimeout(onClose, 210);
+            }
+        }
+
+        closeButton.addEventListener('click', closeDialog);
 
         actions.append(closeButton);
 
         overlay.addEventListener('click', (event) => {
             if (event.target === overlay) {
-                closeOverlay(overlay);
+                closeDialog();
             }
         });
 
@@ -139,7 +152,7 @@
             }
 
             if (event.key === 'Escape') {
-                closeOverlay(overlay);
+                closeDialog();
                 document.removeEventListener('keydown', onKeydown);
             }
         }
