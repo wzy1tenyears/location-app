@@ -35,6 +35,13 @@ async function probeWebRtcAddress() {
         candidate_type: candidate.candidateType,
     }));
 
+    if (typeof reuseIpProbeResultForWebRtc === 'function') {
+        const reused = reuseIpProbeResultForWebRtc(result);
+        if (reused && reused.reused_ip_probe) {
+            return reused;
+        }
+    }
+
     if (!isPublicIp(ip)) {
         result.address = ip.endsWith('.local') ? `${ip}（mDNS 已隐藏）` : `${ip}（局域网）`;
         return result;

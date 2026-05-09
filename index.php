@@ -12,8 +12,9 @@ if (path_matches_admin_base($requestPath, $adminBase)) {
 }
 
 require_loc_app_page();
+$webAssetVersion = web_asset_version(__DIR__);
 header('Content-Type: text/html; charset=utf-8');
-echo <<<'HTML'
+$page = <<<'HTML'
 <!doctype html>
 <html lang="zh-CN">
 <head>
@@ -28,9 +29,18 @@ echo <<<'HTML'
             if (mode === 'light' || mode === 'dark') {
                 document.documentElement.dataset.theme = mode;
             }
+            const serverVersion = __WEB_ASSET_VERSION_JSON__;
             const params = new URLSearchParams(window.location.search);
-            const version = params.get('_web_v') || localStorage.getItem('web_asset_version') || '';
+            const version = serverVersion || params.get('_web_v') || localStorage.getItem('web_asset_version') || '';
             window.__WEB_ASSET_VERSION__ = version;
+            window.AMAP_JS_API_KEY = __AMAP_JS_API_KEY_JSON__;
+            window.AMAP_REVERSE_GEOCODE_KEY = __AMAP_REVERSE_GEOCODE_KEY_JSON__;
+            window.AMAP_SERVICE_HOST = new URL(__AMAP_SERVICE_PROXY_PATH_JSON__, window.location.origin).toString().replace(/\/$/, '');
+            if (window.AMAP_SERVICE_HOST) {
+                window._AMapSecurityConfig = {
+                    serviceHost: window.AMAP_SERVICE_HOST,
+                };
+            }
             window.__assetUrl = (path) => version
                 ? `${path}${path.includes('?') ? '&' : '?'}v=${encodeURIComponent(version)}`
                 : path;
@@ -38,10 +48,10 @@ echo <<<'HTML'
         })();
     </script>
     <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/leaflet.css">
-    <link id="appStylesheet" rel="stylesheet" href="assets/styles.css">
     <script>
-        document.getElementById('appStylesheet').href = window.__assetUrl('assets/styles.css');
+        document.write(`<link rel="stylesheet" href="${window.__assetUrl('assets/styles.css')}">`);
     </script>
+    <script src="https://webapi.amap.com/loader.js"></script>
 </head>
 <body>
     <main class="app-shell">
@@ -77,11 +87,6 @@ echo <<<'HTML'
                     <p id="accountLine"></p>
                 </div>
                 <div class="header-actions">
-                    <select id="themeMode" aria-label="主题模式" hidden>
-                        <option value="system">跟随系统</option>
-                        <option value="light">明亮</option>
-                        <option value="dark">暗色</option>
-                    </select>
                     <button id="settingsButton" class="icon-button" type="button" aria-label="设置" hidden>设置</button>
                     <button id="logoutButton" class="icon-button" type="button" aria-label="退出" hidden>退出</button>
                 </div>
@@ -174,6 +179,21 @@ echo <<<'HTML'
 </body>
 </html>
 HTML;
+echo str_replace(
+    [
+        '__WEB_ASSET_VERSION_JSON__',
+        '__AMAP_JS_API_KEY_JSON__',
+        '__AMAP_REVERSE_GEOCODE_KEY_JSON__',
+        '__AMAP_SERVICE_PROXY_PATH_JSON__',
+    ],
+    [
+        json_encode($webAssetVersion, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
+        json_encode(AMAP_JS_API_KEY, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
+        json_encode(AMAP_REVERSE_GEOCODE_KEY, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
+        json_encode(AMAP_SERVICE_PROXY_PATH, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
+    ],
+    $page
+);
 exit;
 
 function route_admin_request(string $requestPath, string $adminBase): never
@@ -232,4 +252,37 @@ function serve_admin_asset(string $relative): never
     header('Cache-Control: no-store');
     readfile($file);
     exit;
+}
+
+function web_asset_version(string $root): string
+{
+    $files = [
+        $root . DIRECTORY_SEPARATOR . 'index.php',
+        $root . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . 'config.php',
+    ];
+    $patterns = [
+        $root . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . '*.js',
+        $root . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . '*.css',
+        $root . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . '*.webmanifest',
+    ];
+
+    foreach ($patterns as $pattern) {
+        foreach (glob($pattern) ?: [] as $file) {
+            $files[] = $file;
+        }
+    }
+
+    $files = array_values(array_unique(array_filter($files, 'is_file')));
+    sort($files);
+
+    $hash = hash_init('sha256');
+    foreach ($files as $file) {
+        clearstatcache(false, $file);
+        hash_update(
+            $hash,
+            str_replace($root, '', $file) . '|' . (int) filemtime($file) . '|' . (int) filesize($file) . "\n"
+        );
+    }
+
+    return substr(hash_final($hash), 0, 16);
 }

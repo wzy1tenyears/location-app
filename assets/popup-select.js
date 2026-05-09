@@ -158,7 +158,7 @@
     }
 
     function enhanceSelect(select) {
-        if (enhanced.has(select) || select.dataset.popupSelect === 'off') {
+        if (enhanced.has(select) || select.hidden || select.dataset.popupSelect === 'off') {
             return;
         }
 

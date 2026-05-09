@@ -8,6 +8,10 @@ const ANDROID_VERSION_NAME = '1.0.0';
 const ANDROID_APK_FILENAME = 'location-release.apk';
 const ANDROID_FORCE_UPDATE = true;
 const IPINFO_LITE_TOKEN = ''; // https://ipinfo.io/
+const AMAP_JS_API_KEY = ''; // https://lbs.amap.com/
+const AMAP_SECURITY_JS_CODE = '';
+const AMAP_REVERSE_GEOCODE_KEY = AMAP_JS_API_KEY;
+const AMAP_SERVICE_PROXY_PATH = '/_AMapService';
 const APP_DEVICE_COOKIE_NAME = 'loc_device';
 
 const DB_HOST = '127.0.0.1';

@@ -483,6 +483,23 @@ select:focus {
     color: var(--ink) !important;
 }
 
+.amap-info-content,
+.amap-info-sharp {
+    background: var(--panel) !important;
+    color: var(--ink) !important;
+}
+
+.amap-info-content {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.22);
+}
+
+.amap-popup-content {
+    color: var(--ink);
+    line-height: 1.6;
+}
+
 .location-grid {
     display: grid;
     gap: 12px;

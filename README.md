@@ -36,6 +36,20 @@ private/config.php
 
 `private/config.php` 含敏感信息，线上 Nginx 必须禁止外部访问 `/private/`。
 
+## 高德地图配置
+
+项目使用高德地图 JS API 2.0。前端只暴露 JS API Key，安全密钥应留在服务器端，并通过 Nginx 的 `/_AMapService` 代理规则追加。
+
+部署前需要修改：
+
+```php
+const AMAP_JS_API_KEY = '你的高德 JS API Key';
+const AMAP_SECURITY_JS_CODE = '你的高德安全密钥';
+const AMAP_SERVICE_PROXY_PATH = '/_AMapService';
+```
+
+同时把 `nginx-location.conf` 中的 `/_AMapService` 规则放入站点 `server { ... }`，并把 `你的高德安全密钥` 替换成真实值。
+
 ## Android 打包前准备
 
 打包软件前先准备两件事：

@@ -213,8 +213,10 @@ async function probeIpAddress(onUpdate = null) {
 
     const geocoded = variants.map((variant) => ({ ...variant, geo: null }));
     const emitUpdate = () => {
+        const currentResult = buildIpProbeResult(result, geocoded, serverIp);
+        rememberIpProbeResult(currentResult);
         if (typeof onUpdate === 'function') {
-            onUpdate(buildIpProbeResult(result, geocoded, serverIp));
+            onUpdate(currentResult);
         }
     };
     const tasks = variants.map((variant, index) => (
@@ -235,6 +237,7 @@ async function probeIpAddress(onUpdate = null) {
 
     await firstUsefulGeocodedVariant(tasks);
     const fastResult = buildIpProbeResult(result, geocoded, serverIp);
+    rememberIpProbeResult(fastResult);
 
     Promise.allSettled(tasks).then(() => emitUpdate());
     return fastResult;
@@ -246,6 +249,8 @@ function buildIpProbeResult(baseResult, geocoded, serverIp) {
     };
     const preferred = choosePreferredProbeEntry(geocoded);
     const preferredGeo = preferred && preferred.geo ? preferred.geo : null;
+    const displayPreferred = chooseDisplayProbeEntry(geocoded) || preferred;
+    const displayPreferredGeo = displayPreferred && displayPreferred.geo ? displayPreferred.geo : preferredGeo;
 
     result.ip = preferred ? preferred.ip : (geocoded[0] ? geocoded[0].ip : '');
     result.server_ip = serverIp;
@@ -254,9 +259,9 @@ function buildIpProbeResult(baseResult, geocoded, serverIp) {
     result.ipv4 = ipv4Variant ? ipv4Variant.ip : '';
     result.ipv6 = ipv6Variant ? ipv6Variant.ip : '';
     result.address = formatIpProbeAddress(geocoded);
-    result.city = preferredGeo && preferredGeo.city ? preferredGeo.city : cityDisplayName(inferCityFromText(result.address));
-    result.region = preferredGeo ? preferredGeo.region : '';
-    result.country = preferredGeo ? preferredGeo.country : '';
+    result.city = displayPreferredGeo && displayPreferredGeo.city ? displayPreferredGeo.city : cityDisplayName(inferCityFromText(result.address));
+    result.region = displayPreferredGeo ? displayPreferredGeo.region : '';
+    result.country = displayPreferredGeo ? displayPreferredGeo.country : '';
     applyCoordinates(result, preferredGeo);
     result.variants = geocoded.map((variant) => {
         const coordinates = variant.geo ? sourceCoordinates(variant.geo) : null;
@@ -275,6 +280,12 @@ function buildIpProbeResult(baseResult, geocoded, serverIp) {
     });
 
     return result;
+}
+
+function rememberIpProbeResult(result) {
+    if (result && typeof window !== 'undefined') {
+        window.__latestIpProbeResult = result;
+    }
 }
 
 function firstUsefulGeocodedVariant(promises) {
@@ -710,6 +721,12 @@ function choosePreferredProbeEntry(entries) {
         || entries.find((entry) => entry.label === 'IPv6')
         || entries[0]
         || null;
+}
+
+function chooseDisplayProbeEntry(entries) {
+    return entries.find((entry) => entry.label === 'IPv6' && entry.geo && normalizeCity(entry.geo.city || inferCityFromText(entry.geo.address || '')))
+        || entries.find((entry) => entry.label === 'IPv6' && entry.geo)
+        || choosePreferredProbeEntry(entries);
 }
 
 function uniqueCandidates(values) {

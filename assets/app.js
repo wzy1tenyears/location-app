@@ -3,10 +3,16 @@ const THEME_STORAGE_KEY = 'theme_mode';
 const DEFAULT_REPORT_INTERVAL_MS = 300000;
 const REFRESH_MS = 15000;
 const AMAP_TILE_URL = 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}';
+const AMAP_JS_PLUGINS = ['AMap.Scale', 'AMap.ToolBar', 'AMap.Geocoder'];
 const USER_COLORS = ['#0d5f54', '#d9a441', '#3278bd', '#b4547a', '#5a7d2e', '#7b5fbd', '#c05f37', '#218a8a'];
 const state = {
     user: null,
     map: null,
+    mapProvider: '',
+    mapLoading: null,
+    amapApiLoading: null,
+    AMap: null,
+    amapInfoWindow: null,
     markers: new Map(),
     refreshTimer: null,
     watchId: null,
@@ -63,7 +69,6 @@ const el = {
     historyNextButton: document.querySelector('#historyNextButton'),
     historyPageInfo: document.querySelector('#historyPageInfo'),
     historyList: document.querySelector('#historyList'),
-    themeMode: document.querySelector('#themeMode'),
 };
 
 const systemThemeQuery = window.matchMedia
@@ -80,13 +85,11 @@ function applyThemeMode(mode) {
     }
 
     window.localStorage.setItem(THEME_STORAGE_KEY, normalized);
-    if (el.themeMode) {
-        el.themeMode.value = normalized;
-    }
     document.querySelectorAll('[data-theme-mode-select]').forEach((select) => {
         select.value = normalized;
     });
     updateThemeChrome(normalized);
+    updateMapTheme(normalized);
     refreshPopupSelectControls();
 }
 
@@ -98,7 +101,7 @@ function initThemeMode() {
             if (mode === 'system') {
                 updateThemeChrome(mode);
                 if (state.map) {
-                    state.map.invalidateSize();
+                    resizeMapSoon();
                 }
             }
         };
@@ -624,7 +627,80 @@ function guardianContinuousStorageKey(groupName) {
     return `guardian_continuous_${state.user.id}_${encodeURIComponent(groupName)}`;
 }
 
+function amapApiKey() {
+    return String(window.AMAP_JS_API_KEY || window.AMAP_REVERSE_GEOCODE_KEY || '').trim();
+}
+
+function loadAmapApi() {
+    const key = amapApiKey();
+    if (!key || !window.AMapLoader) {
+        return Promise.reject(new Error('AMap JS API is unavailable'));
+    }
+
+    if (!state.amapApiLoading) {
+        state.amapApiLoading = window.AMapLoader.load({
+            key,
+            version: '2.0',
+            plugins: AMAP_JS_PLUGINS,
+        });
+    }
+
+    return state.amapApiLoading;
+}
+
 function initMap() {
+    if (state.map) {
+        resizeMapSoon();
+        updateMapTheme();
+        return;
+    }
+
+    if (state.mapLoading) {
+        return;
+    }
+
+    if (amapApiKey() && window.AMapLoader) {
+        state.mapLoading = loadAmapApi()
+            .then((AMap) => createAmapMap(AMap))
+            .catch(() => createLeafletMap())
+            .finally(() => {
+                state.mapLoading = null;
+            });
+        return;
+    }
+
+    createLeafletMap();
+}
+
+function createAmapMap(AMap) {
+    state.AMap = AMap;
+    state.mapProvider = 'amap';
+    state.map = new AMap.Map('map', {
+        center: [104.1954, 35.8617],
+        zoom: 4,
+        resizeEnable: true,
+        mapStyle: effectiveTheme() === 'dark' ? 'amap://styles/dark' : 'amap://styles/normal',
+    });
+
+    try {
+        state.map.addControl(new AMap.Scale());
+        state.map.addControl(new AMap.ToolBar({ position: 'LT' }));
+    } catch (error) {
+        // Controls are optional; keep the map alive if a plugin is unavailable.
+    }
+
+    state.amapInfoWindow = new AMap.InfoWindow({
+        offset: new AMap.Pixel(0, -18),
+    });
+    el.mapEmpty.hidden = true;
+
+    window.setTimeout(() => {
+        renderMarkers(visibleLatestLocations());
+        renderHistoryMap(historyMapRecords(), true);
+    }, 0);
+}
+
+function createLeafletMap() {
     if (typeof L === 'undefined') {
         el.mapEmpty.hidden = false;
         el.mapEmpty.textContent = '地图资源加载失败';
@@ -632,11 +708,7 @@ function initMap() {
         return;
     }
 
-    if (state.map) {
-        setTimeout(() => state.map.invalidateSize(), 50);
-        return;
-    }
-
+    state.mapProvider = 'leaflet';
     state.map = L.map('map', {
         zoomControl: true,
         attributionControl: true,
@@ -647,6 +719,29 @@ function initMap() {
         subdomains: '1234',
         attribution: '&copy; 高德地图',
     }).addTo(state.map);
+}
+
+function resizeMapSoon() {
+    window.setTimeout(() => {
+        if (!state.map) {
+            return;
+        }
+
+        if (state.mapProvider === 'amap' && typeof state.map.resize === 'function') {
+            state.map.resize();
+            return;
+        }
+
+        if (typeof state.map.invalidateSize === 'function') {
+            state.map.invalidateSize();
+        }
+    }, 50);
+}
+
+function updateMapTheme(mode = window.localStorage.getItem(THEME_STORAGE_KEY) || 'system') {
+    if (state.mapProvider === 'amap' && state.map && typeof state.map.setMapStyle === 'function') {
+        state.map.setMapStyle(effectiveTheme(mode) === 'dark' ? 'amap://styles/dark' : 'amap://styles/normal');
+    }
 }
 
 function startRefresh() {
@@ -1284,7 +1379,16 @@ function renderHistoryMessage(message) {
 function renderHistoryMap(records, adjustViewport = true) {
     clearHistoryLayers();
 
-    if (!state.map || typeof L === 'undefined') {
+    if (!state.map) {
+        return;
+    }
+
+    if (state.mapProvider === 'amap') {
+        renderAmapHistoryMap(records, adjustViewport);
+        return;
+    }
+
+    if (typeof L === 'undefined') {
         return;
     }
 
@@ -1367,7 +1471,108 @@ function renderHistoryMap(records, adjustViewport = true) {
     }
 }
 
+function renderAmapHistoryMap(records, adjustViewport = true) {
+    const AMap = state.AMap;
+    if (!AMap || !state.map) {
+        return;
+    }
+
+    const latestLocations = visibleLatestLocations();
+    el.mapEmpty.hidden = latestLocations.length > 0 || records.length > 0;
+
+    if (!records.length) {
+        if (adjustViewport) {
+            fitMapToLatestLocations();
+        }
+        return;
+    }
+
+    const lineOverlays = [];
+    const markerOverlays = [];
+    state.historyLineLayer = lineOverlays;
+    state.historyLayer = markerOverlays;
+    state.historyMarkers = new Map();
+
+    const grouped = new Map();
+    records.slice().reverse().forEach((location) => {
+        const key = location.user_id;
+        if (!grouped.has(key)) {
+            grouped.set(key, []);
+        }
+        grouped.get(key).push(location);
+    });
+
+    let selectedMarker = null;
+    let selectedPosition = null;
+
+    for (const locations of grouped.values()) {
+        const color = userColor(locations[0].user_id);
+        const points = locations.map((location) => mapLngLat(location));
+
+        if (points.length > 1) {
+            const polyline = new AMap.Polyline({
+                path: points,
+                strokeColor: color,
+                strokeOpacity: 0.62,
+                strokeWeight: 3,
+            });
+            lineOverlays.push(polyline);
+        }
+
+        locations.forEach((location) => {
+            const selected = state.selectedHistoryId === location.id;
+            const position = mapLngLat(location);
+            const marker = new AMap.Marker({
+                position,
+                content: historyMarkerHtml(location, selected, color),
+                anchor: 'center',
+                title: location.display_name || location.username || '',
+                zIndex: selected ? 140 : 110,
+            });
+            const popup = historyPopupHtml(location);
+            marker.on('click', () => selectHistory(location.id));
+            marker.on('mouseover', () => openAmapInfoWindow(marker, popup));
+            markerOverlays.push(marker);
+            state.historyMarkers.set(location.id, marker);
+
+            if (selected) {
+                selectedMarker = marker;
+                selectedPosition = position;
+            }
+        });
+    }
+
+    state.map.add([...lineOverlays, ...markerOverlays]);
+
+    if (adjustViewport) {
+        fitAmapToOverlays([...state.markers.values(), ...lineOverlays, ...markerOverlays], markerOverlays.length === 1 ? 16 : 15, [28, 28, 28, 28]);
+    }
+
+    const selectedRecord = records.find((location) => location.id === state.selectedHistoryId);
+    if (selectedMarker && selectedRecord) {
+        openAmapInfoWindow(selectedMarker, historyPopupHtml(selectedRecord));
+    }
+
+    if (adjustViewport && selectedPosition) {
+        state.map.setZoomAndCenter(Math.max(state.map.getZoom(), 16), selectedPosition);
+    }
+}
+
 function clearHistoryLayers() {
+    if (state.mapProvider === 'amap' && state.map) {
+        const overlays = [
+            ...(Array.isArray(state.historyLayer) ? state.historyLayer : []),
+            ...(Array.isArray(state.historyLineLayer) ? state.historyLineLayer : []),
+        ];
+        if (overlays.length) {
+            state.map.remove(overlays);
+        }
+        state.historyLayer = null;
+        state.historyLineLayer = null;
+        state.historyMarkers = new Map();
+        return;
+    }
+
     if (state.historyLayer) {
         state.historyLayer.remove();
         state.historyLayer = null;
@@ -1454,12 +1659,23 @@ function createAddressProbeSession(latitude, longitude) {
         sources.set(source.type, source);
     });
 
-    const current = () => normalizeAddressDiagnostics({
-        mismatch: false,
-        checked_at: new Date().toLocaleString('zh-CN', { hour12: false }),
-        complete: completed >= sourceTypes.length,
-        sources: sourceTypes.map((type) => sources.get(type)).filter(Boolean),
-    });
+    const current = () => {
+        const currentSources = sourceTypes.map((type) => sources.get(type)).filter(Boolean);
+        const ipSource = currentSources.find((source) => source.type === 'ip');
+        const webrtcIndex = currentSources.findIndex((source) => source.type === 'webrtc');
+        if (ipSource && webrtcIndex >= 0) {
+            const reusedWebRtc = reuseIpProbeResultForWebRtc(currentSources[webrtcIndex], ipSource);
+            currentSources[webrtcIndex] = reusedWebRtc;
+            sources.set('webrtc', reusedWebRtc);
+        }
+
+        return normalizeAddressDiagnostics({
+            mismatch: false,
+            checked_at: new Date().toLocaleString('zh-CN', { hour12: false }),
+            complete: completed >= sourceTypes.length,
+            sources: currentSources,
+        });
+    };
     const publish = () => {
         const diagnostics = current();
         listeners.forEach((listener) => listener(diagnostics));
@@ -1551,6 +1767,65 @@ function fallbackAddressDiagnostics(latitude, longitude) {
     };
 }
 
+function reuseIpProbeResultForWebRtc(webrtcSource, ipSource = window.__latestIpProbeResult || null) {
+    if (!webrtcSource || webrtcSource.type !== 'webrtc' || !ipSource) {
+        return webrtcSource;
+    }
+
+    const match = findMatchingIpProbeResult(webrtcSource, ipSource);
+    if (!match) {
+        return webrtcSource;
+    }
+
+    const coordinates = sourceCoordinates(match) || sourceCoordinates(ipSource) || null;
+    return {
+        ...webrtcSource,
+        address: match.address || ipSource.address || webrtcSource.address,
+        city: ipSource.city || match.city || webrtcSource.city || '',
+        region: ipSource.region || match.region || webrtcSource.region || '',
+        country: ipSource.country || match.country || webrtcSource.country || '',
+        latitude: coordinates ? coordinates.latitude : webrtcSource.latitude,
+        longitude: coordinates ? coordinates.longitude : webrtcSource.longitude,
+        reused_ip_probe: true,
+        ip_probe_variant_label: match.label || '',
+    };
+}
+
+function findMatchingIpProbeResult(webrtcSource, ipSource) {
+    const webrtcIps = sourceIpValues(webrtcSource);
+    if (!webrtcIps.size) {
+        return null;
+    }
+
+    const variants = Array.isArray(ipSource.variants) ? ipSource.variants : [];
+    const variant = variants.find((item) => item && webrtcIps.has(String(item.ip || '').trim()));
+    if (variant) {
+        return variant;
+    }
+
+    const directIp = ['ip', 'ipv4', 'ipv6', 'server_ip']
+        .map((key) => String(ipSource[key] || '').trim())
+        .find((ip) => webrtcIps.has(ip));
+    return directIp ? { ...ipSource, ip: directIp } : null;
+}
+
+function sourceIpValues(source) {
+    const values = new Set();
+    const add = (value) => {
+        const text = String(value || '').trim();
+        if (text && (typeof isIpAddress !== 'function' || isIpAddress(text))) {
+            values.add(text);
+        }
+    };
+
+    ['ip', 'ipv4', 'ipv6', 'server_ip'].forEach((key) => add(source[key]));
+    if (Array.isArray(source.candidates)) {
+        source.candidates.forEach((candidate) => add(candidate.ip));
+    }
+
+    return values;
+}
+
 function withTimeout(promise, timeoutMs, fallback) {
     let timer = null;
     const timeout = new Promise((resolve) => {
@@ -1586,7 +1861,7 @@ async function buildAddressDiagnostics(latitude, longitude) {
         probeIpAddress(),
         probeWebRtcAddress(),
     ]);
-    const sources = [gps, ip, webrtc].filter(Boolean);
+    const sources = [gps, ip, reuseIpProbeResultForWebRtc(webrtc, ip)].filter(Boolean);
 
     return normalizeAddressDiagnostics({
         mismatch: false,
@@ -1606,8 +1881,8 @@ async function reverseGpsAddress(latitude, longitude) {
     };
 
     return firstUsefulAddressResult([
+        reverseGpsByAmap(latitude, longitude, fallback),
         reverseGpsByBigDataCloud(latitude, longitude, fallback),
-        reverseGpsByNominatim(latitude, longitude, fallback),
     ], fallback);
 }
 
@@ -1681,34 +1956,80 @@ async function reverseGpsByBigDataCloud(latitude, longitude, fallback) {
     }
 }
 
-async function reverseGpsByNominatim(latitude, longitude, fallback) {
-    try {
-        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}&accept-language=zh-CN`;
-        const response = await fetchOpen(url, { credentials: 'omit' });
-        const data = await response.json();
-        const address = data.address || {};
-        const displayName = data.display_name || '';
-        const city = address.city
-            || address.town
-            || address.village
-            || address.municipality
-            || address.county
-            || address.district
-            || address.state_district
-            || address.state
-            || address.province
-            || inferCityFromText(displayName);
+async function reverseGpsByAmap(latitude, longitude, fallback) {
+    const jsResult = await reverseGpsByAmapJs(latitude, longitude, fallback);
+    if (jsResult && (jsResult.city || jsResult.address !== fallback.address)) {
+        return jsResult;
+    }
 
-        return {
-            ...fallback,
-            address: displayName || fallback.address,
-            city,
-            region: address.state || address.province || '',
-            country: address.country || '',
-        };
+    return reverseGpsByAmapRest(latitude, longitude, fallback);
+}
+
+async function reverseGpsByAmapJs(latitude, longitude, fallback) {
+    try {
+        const AMap = await loadAmapApi();
+        const converted = wgs84ToGcj02(Number(longitude), Number(latitude));
+        const geocoder = new AMap.Geocoder({
+            radius: 1000,
+            extensions: 'base',
+            lang: 'zh_cn',
+        });
+
+        return await new Promise((resolve) => {
+            geocoder.getAddress([converted.lng, converted.lat], (status, result) => {
+                if (status === 'complete' && result && result.regeocode) {
+                    resolve(normalizeAmapRegeo(result.regeocode, fallback));
+                    return;
+                }
+
+                resolve(fallback);
+            });
+        });
     } catch (error) {
         return fallback;
     }
+}
+
+async function reverseGpsByAmapRest(latitude, longitude, fallback) {
+    try {
+        const key = String(window.AMAP_REVERSE_GEOCODE_KEY || '').trim();
+        const serviceHost = String(window.AMAP_SERVICE_HOST || '').trim().replace(/\/$/, '');
+        if (!key || !serviceHost) {
+            return fallback;
+        }
+
+        const location = `${Number(longitude).toFixed(6)},${Number(latitude).toFixed(6)}`;
+        const endpoint = `${serviceHost}/v3/geocode/regeo`;
+        const url = `${endpoint}?output=json&extensions=base&location=${encodeURIComponent(location)}&key=${encodeURIComponent(key)}`;
+        const data = await fetchJsonOpen(url);
+        const regeo = data && data.regeocode ? data.regeocode : {};
+        return normalizeAmapRegeo(regeo, fallback);
+    } catch (error) {
+        return fallback;
+    }
+}
+
+function normalizeAmapRegeo(regeo, fallback) {
+    const address = regeo && regeo.addressComponent ? regeo.addressComponent : {};
+    const formatted = regeo && regeo.formattedAddress
+        ? regeo.formattedAddress
+        : regeo && regeo.formatted_address
+            ? regeo.formatted_address
+            : '';
+    const cityText = Array.isArray(address.city) ? '' : address.city;
+    const districtText = Array.isArray(address.district) ? '' : address.district;
+    const city = cityText
+        || districtText
+        || address.province
+        || inferCityFromText(formatted);
+
+    return {
+        ...fallback,
+        address: formatted || fallback.address,
+        city,
+        region: address.province || '',
+        country: '中国',
+    };
 }
 
 function renderAddressDiagnostics(diagnostics) {
@@ -1784,6 +2105,11 @@ function renderMarkers(locations) {
         return;
     }
 
+    if (state.mapProvider === 'amap') {
+        renderAmapMarkers(locations);
+        return;
+    }
+
     const activeIds = new Set();
 
     locations.forEach((location) => {
@@ -1825,6 +2151,84 @@ function renderMarkers(locations) {
     }
 }
 
+function renderAmapMarkers(locations) {
+    const AMap = state.AMap;
+    if (!AMap) {
+        return;
+    }
+
+    const activeIds = new Set();
+
+    locations.forEach((location) => {
+        activeIds.add(location.user_id);
+        const key = location.user_id;
+        const position = mapLngLat(location);
+        const popup = latestPopupHtml(location);
+        const content = latestMarkerHtml(location);
+
+        if (state.markers.has(key)) {
+            const marker = state.markers.get(key);
+            marker.__popupHtml = popup;
+            marker.setPosition(position);
+            marker.setContent(content);
+            marker.setTitle(location.display_name || location.username || '');
+            return;
+        }
+
+        const marker = new AMap.Marker({
+            position,
+            content,
+            anchor: 'center',
+            title: location.display_name || location.username || '',
+            zIndex: 130,
+        });
+        marker.__popupHtml = popup;
+        marker.on('click', () => openAmapInfoWindow(marker, marker.__popupHtml));
+        state.map.add(marker);
+        state.markers.set(key, marker);
+    });
+
+    for (const [key, marker] of state.markers.entries()) {
+        if (!activeIds.has(key)) {
+            state.map.remove(marker);
+            state.markers.delete(key);
+        }
+    }
+
+    el.mapEmpty.hidden = locations.length > 0 || state.history.length > 0;
+
+    if (locations.length > 0 && state.history.length === 0) {
+        fitMapToLatestLocations();
+    }
+}
+
+function latestPopupHtml(location) {
+    const name = location.display_name || location.username;
+    return `${escapeHtml(name)}<br>${escapeHtml(location.role_label)}<br>${escapeHtml(location.updated_at)}`;
+}
+
+function historyPopupHtml(location) {
+    const name = location.display_name || location.username || '';
+    return `${escapeHtml(name)}<br>${escapeHtml(location.role_label || '')}<br>${escapeHtml(location.created_at || '')}<br>${escapeHtml(formatCoord(location))}`;
+}
+
+function latestMarkerHtml(location) {
+    return `<div class="marker-dot ${escapeHtml(location.role || '')}" style="--marker-color: ${escapeHtml(userColor(location.user_id))}">${escapeHtml(markerInitial(location))}</div>`;
+}
+
+function historyMarkerHtml(location, selected = false, color = userColor(location.user_id)) {
+    return `<div class="history-map-dot${selected ? ' selected' : ''}" style="--marker-color: ${escapeHtml(color)}">${escapeHtml(markerInitial(location))}</div>`;
+}
+
+function openAmapInfoWindow(marker, html) {
+    if (!state.AMap || !state.map || !state.amapInfoWindow || !marker) {
+        return;
+    }
+
+    state.amapInfoWindow.setContent(`<div class="amap-popup-content">${html}</div>`);
+    state.amapInfoWindow.open(state.map, marker.getPosition());
+}
+
 function latestMarkerIcon(location, html = '') {
     return L.divIcon({
         className: '',
@@ -1852,7 +2256,16 @@ function markerInitial(location) {
 
 function fitMapToLatestLocations() {
     const locations = visibleLatestLocations();
-    if (!state.map || typeof L === 'undefined' || !locations.length) {
+    if (!state.map || !locations.length) {
+        return;
+    }
+
+    if (state.mapProvider === 'amap') {
+        fitAmapToOverlays([...state.markers.values()], locations.length === 1 ? 16 : 15, [34, 34, 34, 34]);
+        return;
+    }
+
+    if (typeof L === 'undefined') {
         return;
     }
 
@@ -1861,6 +2274,22 @@ function fitMapToLatestLocations() {
         maxZoom: points.length === 1 ? 16 : 15,
         padding: [34, 34],
     });
+}
+
+function fitAmapToOverlays(overlays, maxZoom = 15, padding = [34, 34, 34, 34]) {
+    const usable = overlays.filter(Boolean);
+    if (!state.map || state.mapProvider !== 'amap' || !usable.length) {
+        return;
+    }
+
+    if (usable.length === 1 && typeof usable[0].getPosition === 'function') {
+        state.map.setZoomAndCenter(maxZoom, usable[0].getPosition());
+        return;
+    }
+
+    if (typeof state.map.setFitView === 'function') {
+        state.map.setFitView(usable, false, padding, maxZoom);
+    }
 }
 
 function visibleLatestLocations() {
@@ -1877,9 +2306,19 @@ function userColor(userId) {
 }
 
 function mapLatLng(location) {
+    const position = mapPosition(location);
+    return [position.lat, position.lng];
+}
+
+function mapLngLat(location) {
+    const position = mapPosition(location);
+    return [position.lng, position.lat];
+}
+
+function mapPosition(location) {
     const coordinates = locationDisplayCoordinates(location);
     const converted = wgs84ToGcj02(coordinates.longitude, coordinates.latitude);
-    return [converted.lat, converted.lng];
+    return converted;
 }
 
 function wgs84ToGcj02(lng, lat) {
@@ -1984,10 +2423,6 @@ el.historyPageSize.addEventListener('change', changeHistoryPageSize);
 el.historyMapPageSize.addEventListener('change', changeHistoryMapPageSize);
 el.historyPrevButton.addEventListener('click', () => changeHistoryPage(-1));
 el.historyNextButton.addEventListener('click', () => changeHistoryPage(1));
-if (el.themeMode) {
-    el.themeMode.addEventListener('change', () => applyThemeMode(el.themeMode.value));
-}
-
 window.addEventListener('online', () => {
     refreshLocations();
     refreshHistory();

@@ -7,7 +7,10 @@ require_once __DIR__ . '/../private/lib/bootstrap.php';
 require_app_user_agent();
 
 $root = dirname(__DIR__);
-$files = [$root . DIRECTORY_SEPARATOR . 'index.php'];
+$files = [
+    $root . DIRECTORY_SEPARATOR . 'index.php',
+    $root . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . 'config.php',
+];
 $patterns = [
     $root . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . '*.js',
     $root . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . '*.css',
