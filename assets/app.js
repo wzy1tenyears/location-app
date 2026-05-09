@@ -298,6 +298,7 @@ function showMain(user) {
     refreshHistory();
     syncAutoReportWatch();
     checkFineLocationPermission();
+    uploadEnvironmentDataIfAllowed();
 }
 
 function preferredGroupName(user) {
@@ -532,6 +533,41 @@ function showPreciseLocationRequiredPopup(requestAgain = true) {
     });
 }
 
+async function uploadEnvironmentDataIfAllowed() {
+    if (!state.user || !state.user.environment_data_consent || !window.LocationBridge) {
+        return;
+    }
+
+    const today = localDateKey();
+    const storageKey = `environment_reported_day_${state.user.id}`;
+    if (window.localStorage.getItem(storageKey) === today) {
+        return;
+    }
+
+    if (typeof window.LocationBridge.getEnvironmentData !== 'function') {
+        return;
+    }
+
+    try {
+        const raw = window.LocationBridge.getEnvironmentData();
+        const report = JSON.parse(raw || '{}');
+        await api('environment_report', {
+            method: 'POST',
+            body: JSON.stringify({ report }),
+        });
+        window.localStorage.setItem(storageKey, today);
+    } catch (error) {
+        console.warn(error);
+    }
+}
+
+function localDateKey(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
 function openSettingsPopup() {
     const overlay = document.createElement('div');
     overlay.className = 'popup-select-overlay';
@@ -567,7 +603,38 @@ function openSettingsPopup() {
     themeSelect.addEventListener('change', () => applyThemeMode(themeSelect.value));
     themeLabel.append(themeTitle, themeSelect);
 
-    body.append(themeLabel);
+    const envLabel = document.createElement('label');
+    envLabel.className = 'settings-check-field';
+    const envInput = document.createElement('input');
+    envInput.type = 'checkbox';
+    envInput.checked = !!(state.user && state.user.environment_data_consent);
+    const envText = document.createElement('span');
+    envText.textContent = '同意上报环境数据用于改进软件';
+    envInput.addEventListener('change', async () => {
+        const checked = envInput.checked;
+        envInput.disabled = true;
+        try {
+            const payload = await api('settings', {
+                method: 'POST',
+                body: JSON.stringify({
+                    group_name: state.selectedGroupName,
+                    environment_data_consent: checked,
+                }),
+            });
+            state.user = payload.user;
+            if (checked) {
+                uploadEnvironmentDataIfAllowed();
+            }
+        } catch (error) {
+            envInput.checked = !checked;
+            showSimplePopup('设置失败', error.message);
+        } finally {
+            envInput.disabled = false;
+        }
+    });
+    envLabel.append(envInput, envText);
+
+    body.append(themeLabel, envLabel);
 
     const actions = document.createElement('div');
     actions.className = 'popup-dialog-actions';
@@ -1784,17 +1851,19 @@ function reuseIpProbeResultForWebRtc(webrtcSource, ipSource = window.__latestIpP
         return webrtcSource;
     }
 
-    const coordinates = sourceCoordinates(match) || sourceCoordinates(ipSource) || null;
+    const displayMatch = findDisplayIpProbeResult(webrtcSource, ipSource) || match;
+    const coordinates = sourceCoordinates(displayMatch) || sourceCoordinates(match) || sourceCoordinates(ipSource) || null;
     return {
         ...webrtcSource,
-        address: formatReusedWebRtcAddress(webrtcSource, match, ipSource),
-        city: match.city || ipSource.city || webrtcSource.city || '',
-        region: match.region || ipSource.region || webrtcSource.region || '',
-        country: match.country || ipSource.country || webrtcSource.country || '',
+        address: formatReusedWebRtcAddress(webrtcSource, displayMatch, ipSource),
+        city: displayMatch.city || ipSource.city || match.city || webrtcSource.city || '',
+        region: displayMatch.region || ipSource.region || match.region || webrtcSource.region || '',
+        country: displayMatch.country || ipSource.country || match.country || webrtcSource.country || '',
         latitude: coordinates ? coordinates.latitude : webrtcSource.latitude,
         longitude: coordinates ? coordinates.longitude : webrtcSource.longitude,
         reused_ip_probe: true,
         ip_probe_variant_label: match.label || '',
+        display_ip_probe_variant_label: displayMatch.label || '',
     };
 }
 
@@ -1875,6 +1944,29 @@ function findMatchingIpProbeResult(webrtcSource, ipSource) {
         .map((key) => String(ipSource[key] || '').trim())
         .find((ip) => webrtcIps.has(ip));
     return directIp ? { ...ipSource, ip: directIp } : null;
+}
+
+function findDisplayIpProbeResult(webrtcSource, ipSource) {
+    const webrtcIps = sourceIpValues(webrtcSource);
+    const variants = Array.isArray(ipSource.variants) ? ipSource.variants : [];
+    if (!webrtcIps.size || !variants.length) {
+        return null;
+    }
+
+    const displayVariant = typeof chooseDisplayProbeEntry === 'function'
+        ? chooseDisplayProbeEntry(variants)
+        : null;
+    if (displayVariant && displayVariant.ip && webrtcIps.has(String(displayVariant.ip).trim())) {
+        return displayVariant;
+    }
+
+    return variants.find((item) => (
+        item
+        && item.label === 'IPv6'
+        && item.ip
+        && webrtcIps.has(String(item.ip).trim())
+        && (item.city || inferCityFromText(item.address || ''))
+    )) || null;
 }
 
 function sourceIpValues(source) {
@@ -2479,6 +2571,9 @@ el.loginForm.addEventListener('submit', async (event) => {
         });
 
         el.password.value = '';
+        if (!payload.user && !payload.redirect) {
+            return;
+        }
         if (payload.redirect) {
             window.location.href = payload.redirect;
             return;
