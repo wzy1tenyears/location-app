@@ -43,6 +43,7 @@ const el = {
     privacyButton: document.querySelector('#privacyButton'),
     appTitle: document.querySelector('#appTitle'),
     accountLine: document.querySelector('#accountLine'),
+    settingsButton: document.querySelector('#settingsButton'),
     logoutButton: document.querySelector('#logoutButton'),
     reportButton: document.querySelector('#reportButton'),
     continuousReportButton: document.querySelector('#continuousReportButton'),
@@ -82,6 +83,9 @@ function applyThemeMode(mode) {
     if (el.themeMode) {
         el.themeMode.value = normalized;
     }
+    document.querySelectorAll('[data-theme-mode-select]').forEach((select) => {
+        select.value = normalized;
+    });
     updateThemeChrome(normalized);
     refreshPopupSelectControls();
 }
@@ -135,6 +139,13 @@ function showDocumentPopup(title, sections) {
     }
 
     openInlinePopupDialog(title, sections);
+}
+
+function showSimplePopup(title, paragraphs) {
+    showDocumentPopup(title, [{
+        title: '',
+        paragraphs: Array.isArray(paragraphs) ? paragraphs : [String(paragraphs || '')],
+    }]);
 }
 
 function openInlinePopupDialog(title, sections) {
@@ -222,7 +233,10 @@ async function api(path, options = {}) {
     }));
 
     if (!response.ok || payload.ok === false) {
-        throw new Error(payload.message || '请求失败。');
+        const error = new Error(payload.message || '请求失败。');
+        error.payload = payload;
+        error.status = response.status;
+        throw error;
     }
 
     return payload;
@@ -246,6 +260,9 @@ function showLogin(message = '') {
     el.continuousReportButton.disabled = false;
     updateContinuousReportButton();
     el.logoutButton.hidden = true;
+    if (el.settingsButton) {
+        el.settingsButton.hidden = true;
+    }
     el.mainView.hidden = true;
     el.loginView.hidden = false;
     el.loginMessage.hidden = message === '';
@@ -259,12 +276,16 @@ function showMain(user) {
     el.loginView.hidden = true;
     el.mainView.hidden = false;
     el.logoutButton.hidden = false;
+    if (el.settingsButton) {
+        el.settingsButton.hidden = false;
+    }
     initMap();
     startRefresh();
     applySelectedGroup(preferredGroupName(user), false);
     refreshLocations();
     refreshHistory();
     syncAutoReportWatch();
+    checkFineLocationPermission();
 }
 
 function preferredGroupName(user) {
@@ -466,6 +487,101 @@ function clearNativeReportingState() {
     }
 }
 
+function checkFineLocationPermission() {
+    if (!window.LocationBridge || typeof window.LocationBridge.hasFineLocationPermission !== 'function') {
+        return;
+    }
+
+    try {
+        if (window.LocationBridge.hasFineLocationPermission() !== true) {
+            showPreciseLocationRequiredPopup(false);
+        }
+    } catch (error) {
+        console.warn(error);
+    }
+}
+
+function requestFineLocationPermissionAgain() {
+    if (window.LocationBridge && typeof window.LocationBridge.requestFineLocationPermission === 'function') {
+        try {
+            window.LocationBridge.requestFineLocationPermission();
+        } catch (error) {
+            console.warn(error);
+        }
+    }
+}
+
+function showPreciseLocationRequiredPopup(requestAgain = true) {
+    showSimplePopup('需要定位权限', [
+        '请开启“始终允许定位”，并启用“精确位置”。否则持续上报、手动上报和地图定位可能无法正常工作。',
+        '如果系统已经拒绝过权限，请到系统设置里的应用权限中手动开启。',
+    ]);
+
+    if (requestAgain) {
+        requestFineLocationPermissionAgain();
+    }
+}
+
+function openSettingsPopup() {
+    const overlay = document.createElement('div');
+    overlay.className = 'popup-select-overlay';
+
+    const card = document.createElement('div');
+    card.className = 'popup-select-card popup-dialog-card';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
+
+    const heading = document.createElement('h2');
+    heading.textContent = '设置';
+
+    const body = document.createElement('div');
+    body.className = 'popup-dialog-body settings-dialog-body';
+
+    const themeLabel = document.createElement('label');
+    themeLabel.className = 'settings-field';
+    const themeTitle = document.createElement('span');
+    themeTitle.textContent = '深色模式';
+    const themeSelect = document.createElement('select');
+    themeSelect.dataset.themeModeSelect = '1';
+    [
+        ['system', '跟随系统'],
+        ['light', '明亮'],
+        ['dark', '暗色'],
+    ].forEach(([value, label]) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        themeSelect.append(option);
+    });
+    themeSelect.value = window.localStorage.getItem(THEME_STORAGE_KEY) || 'system';
+    themeSelect.addEventListener('change', () => applyThemeMode(themeSelect.value));
+    themeLabel.append(themeTitle, themeSelect);
+
+    body.append(themeLabel);
+
+    const actions = document.createElement('div');
+    actions.className = 'popup-dialog-actions';
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.textContent = '关闭';
+    function close() {
+        overlay.classList.remove('is-visible');
+        window.setTimeout(() => overlay.remove(), 200);
+    }
+    closeButton.addEventListener('click', close);
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+            close();
+        }
+    });
+    actions.append(closeButton);
+    card.append(heading, body, actions);
+    overlay.append(card);
+    document.body.append(overlay);
+    refreshPopupSelectControls();
+    window.requestAnimationFrame(() => overlay.classList.add('is-visible'));
+}
+
 function getGuardianContinuousReportingForGroup(groupName = state.selectedGroupName) {
     const localValue = getLocalGuardianContinuousReporting(groupName);
 
@@ -564,6 +680,9 @@ function startWatch() {
         },
         (error) => {
             setStatus(locationErrorMessage(error));
+            if (error.code === error.PERMISSION_DENIED) {
+                showPreciseLocationRequiredPopup(true);
+            }
         },
         {
             enableHighAccuracy: true,
@@ -591,6 +710,9 @@ function requestImmediateAutoReport() {
         },
         (error) => {
             setStatus(locationErrorMessage(error));
+            if (error.code === error.PERMISSION_DENIED) {
+                showPreciseLocationRequiredPopup(true);
+            }
         },
         {
             enableHighAccuracy: true,
@@ -733,6 +855,9 @@ function manualReport() {
         (error) => {
             el.reportButton.disabled = false;
             setStatus(locationErrorMessage(error));
+            if (error.code === error.PERMISSION_DENIED) {
+                showPreciseLocationRequiredPopup(true);
+            }
         },
         {
             enableHighAccuracy: true,
@@ -1811,6 +1936,9 @@ if (el.termsButton) {
 if (el.privacyButton) {
     el.privacyButton.addEventListener('click', () => showDocumentPopup('隐私条约', window.PRIVACY_POLICY_SECTIONS || []));
 }
+if (el.settingsButton) {
+    el.settingsButton.addEventListener('click', openSettingsPopup);
+}
 
 el.loginForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1856,7 +1984,9 @@ el.historyPageSize.addEventListener('change', changeHistoryPageSize);
 el.historyMapPageSize.addEventListener('change', changeHistoryMapPageSize);
 el.historyPrevButton.addEventListener('click', () => changeHistoryPage(-1));
 el.historyNextButton.addEventListener('click', () => changeHistoryPage(1));
-el.themeMode.addEventListener('change', () => applyThemeMode(el.themeMode.value));
+if (el.themeMode) {
+    el.themeMode.addEventListener('change', () => applyThemeMode(el.themeMode.value));
+}
 
 window.addEventListener('online', () => {
     refreshLocations();

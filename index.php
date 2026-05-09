@@ -77,14 +77,12 @@ echo <<<'HTML'
                     <p id="accountLine"></p>
                 </div>
                 <div class="header-actions">
-                    <label class="theme-toggle" for="themeMode">
-                        <span>主题</span>
-                        <select id="themeMode" aria-label="主题模式">
-                            <option value="system">跟随系统</option>
-                            <option value="light">明亮</option>
-                            <option value="dark">暗色</option>
-                        </select>
-                    </label>
+                    <select id="themeMode" aria-label="主题模式" hidden>
+                        <option value="system">跟随系统</option>
+                        <option value="light">明亮</option>
+                        <option value="dark">暗色</option>
+                    </select>
+                    <button id="settingsButton" class="icon-button" type="button" aria-label="设置" hidden>设置</button>
                     <button id="logoutButton" class="icon-button" type="button" aria-label="退出" hidden>退出</button>
                 </div>
             </header>
