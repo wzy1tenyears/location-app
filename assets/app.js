@@ -1799,16 +1799,10 @@ function reuseIpProbeResultForWebRtc(webrtcSource, ipSource = window.__latestIpP
 }
 
 function formatReusedWebRtcAddress(webrtcSource, match, ipSource) {
-    const parts = [match.address || ipSource.address || webrtcSource.address || webrtcSource.ip || ''];
-    const stunLabel = webrtcSource.stun_server
-        ? `${webrtcSource.stun_scope === 'cn' ? '国内 STUN' : '全球 STUN'} ${webrtcSource.stun_server}`
-        : '';
+    const primaryAddress = match.address || ipSource.address || webrtcSource.address || webrtcSource.ip || '';
+    const parts = [primaryAddress];
 
-    if (stunLabel) {
-        parts.push(stunLabel);
-    }
-
-    const candidateText = webRtcCandidateSummary(webrtcSource);
+    const candidateText = webRtcCandidateSummary(webrtcSource, primaryAddress);
     if (candidateText) {
         parts.push(candidateText);
     }
@@ -1816,16 +1810,19 @@ function formatReusedWebRtcAddress(webrtcSource, match, ipSource) {
     return parts.filter(Boolean).join(' / ');
 }
 
-function webRtcCandidateSummary(webrtcSource) {
+function webRtcCandidateSummary(webrtcSource, existingText = '') {
     if (!Array.isArray(webrtcSource.candidates)) {
         return '';
     }
 
     const seen = new Set();
     const candidates = webrtcSource.candidates
-        .filter((candidate) => candidate && candidate.ip)
+        .filter((candidate) => candidate && isDisplayableWebRtcIp(candidate.ip))
         .filter((candidate) => {
-            const key = `${candidate.ip}|${candidate.server || ''}`;
+            const key = String(candidate.ip || '').trim();
+            if (!key || String(existingText || '').includes(key)) {
+                return false;
+            }
             if (seen.has(key)) {
                 return false;
             }
@@ -1834,9 +1831,32 @@ function webRtcCandidateSummary(webrtcSource) {
             return true;
         })
         .slice(0, 5)
-        .map((candidate) => `${candidate.ip}${candidate.server ? `(${candidate.server})` : ''}`);
+        .map((candidate) => String(candidate.ip || '').trim());
 
-    return candidates.length ? `候选：${candidates.join(', ')}` : '';
+    return candidates.length ? candidates.join(', ') : '';
+}
+
+function isDisplayableWebRtcIp(ip) {
+    const value = String(ip || '').trim();
+    if (!value || value.endsWith('.local')) {
+        return false;
+    }
+
+    if (typeof isPublicIp === 'function') {
+        return isPublicIp(value);
+    }
+
+    if (value.includes(':')) {
+        const lower = value.toLowerCase();
+        return !(lower === '::'
+            || lower === '::1'
+            || lower.startsWith('fe80:')
+            || lower.startsWith('fc')
+            || lower.startsWith('fd')
+            || lower.startsWith('ff'));
+    }
+
+    return !/^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(value);
 }
 
 function findMatchingIpProbeResult(webrtcSource, ipSource) {
@@ -2288,9 +2308,9 @@ function openAmapInfoWindow(marker, html) {
 function mapPopupOptions() {
     return {
         className: 'location-map-popup',
-        minWidth: 190,
-        maxWidth: 260,
-        autoPanPadding: [16, 16],
+        minWidth: 130,
+        maxWidth: 190,
+        autoPanPadding: [12, 12],
     };
 }
 

@@ -171,6 +171,9 @@ const IP_PROVIDERS = {
     ],
 };
 
+const IP_GEO_FAST_WAIT_MS = 900;
+const IP_GEO_MIN_EARLY_RESULTS = 3;
+
 async function probeIpAddress(onUpdate = null) {
     const result = {
         type: 'ip',
@@ -337,28 +340,59 @@ function ipGeoProviders() {
 
 function geocodeIp(ip, onBetterGeo = null) {
     const providers = ipGeoProviders();
+    if (!providers.length) {
+        return Promise.resolve(null);
+    }
 
     return new Promise((resolve) => {
         const results = [];
         let pending = providers.length;
         let settled = false;
         let currentGeo = null;
+        let fastTimer = null;
 
-        const publishMajority = () => {
-            const majority = chooseMajorityGeo(results);
-            if (!majority) {
+        const settle = (geo) => {
+            if (settled) {
                 return;
             }
 
-            if (!currentGeo || geoPlaceKey(majority) === geoPlaceKey(currentGeo)) {
+            settled = true;
+            currentGeo = geo || null;
+            if (fastTimer) {
+                window.clearTimeout(fastTimer);
+                fastTimer = null;
+            }
+            resolve(currentGeo);
+        };
+
+        const publishBetter = (geo) => {
+            if (!geo) {
                 return;
             }
 
-            currentGeo = majority;
+            if (!currentGeo || geoPlaceKey(geo) === geoPlaceKey(currentGeo)) {
+                currentGeo = geo;
+                return;
+            }
+
+            currentGeo = geo;
             if (typeof onBetterGeo === 'function') {
-                onBetterGeo(majority);
+                onBetterGeo(geo);
             }
         };
+
+        fastTimer = window.setTimeout(() => {
+            if (settled) {
+                return;
+            }
+
+            const fastGeo = chooseDetailedGeo(results)
+                || choosePreferredGeo(results.filter(Boolean))
+                || null;
+            if (fastGeo) {
+                settle(fastGeo);
+            }
+        }, IP_GEO_FAST_WAIT_MS);
 
         providers.forEach((provider) => {
             Promise.resolve(provider(ip))
@@ -368,12 +402,16 @@ function geocodeIp(ip, onBetterGeo = null) {
                     }
 
                     results.push(geo);
-                    if (!settled) {
-                        settled = true;
-                        currentGeo = geo;
-                        resolve(geo);
+                    const majority = results.length >= IP_GEO_MIN_EARLY_RESULTS
+                        ? chooseMajorityGeo(results)
+                        : null;
+                    if (majority) {
+                        if (!settled) {
+                            settle(majority);
+                        } else {
+                            publishBetter(majority);
+                        }
                     }
-                    publishMajority();
                 })
                 .catch(() => {
                     // Try the other IP geolocation providers.
@@ -384,19 +422,14 @@ function geocodeIp(ip, onBetterGeo = null) {
                         return;
                     }
 
+                    const finalGeo = chooseMajorityGeo(results)
+                        || chooseDetailedGeo(results)
+                        || choosePreferredGeo(results.filter(Boolean))
+                        || null;
                     if (!settled) {
-                        settled = true;
-                        currentGeo = choosePreferredGeo(results.filter(Boolean)) || null;
-                        resolve(currentGeo);
-                        return;
-                    }
-
-                    const finalGeo = chooseMajorityGeo(results) || choosePreferredGeo(results.filter(Boolean)) || null;
-                    if (finalGeo && currentGeo && geoPlaceKey(finalGeo) !== geoPlaceKey(currentGeo)) {
-                        currentGeo = finalGeo;
-                        if (typeof onBetterGeo === 'function') {
-                            onBetterGeo(finalGeo);
-                        }
+                        settle(finalGeo);
+                    } else {
+                        publishBetter(finalGeo);
                     }
                 });
         });

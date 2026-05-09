@@ -26,14 +26,10 @@ async function probeWebRtcAddress() {
 
     const ip = selected.ip;
     result.ip = ip;
-    result.stun_server = selected.serverLabel;
-    result.stun_scope = selected.serverScope;
-    result.candidates = candidates.map((candidate) => ({
-        ip: candidate.ip,
-        server: candidate.serverLabel,
-        scope: candidate.serverScope,
-        candidate_type: candidate.candidateType,
-    }));
+    result.candidates = uniqueCandidates(candidates
+        .filter((candidate) => isPublicIp(candidate.ip))
+        .map((candidate) => candidate.ip))
+        .map((candidateIp) => ({ ip: candidateIp }));
 
     if (typeof reuseIpProbeResultForWebRtc === 'function') {
         const reused = reuseIpProbeResultForWebRtc(result);
@@ -54,14 +50,9 @@ async function probeWebRtcAddress() {
         .filter((candidate) => isPublicIp(candidate.ip))
         .map((candidate) => candidate.ip));
     const otherIps = publicIps.filter((candidateIp) => candidateIp !== ip);
-    const serverLabel = selected.serverScope === 'cn'
-        ? `国内 STUN ${selected.serverLabel}`
-        : `全球 STUN ${selected.serverLabel}`;
-
     result.address = geo ? geo.address : ip;
-    result.address += ` / ${serverLabel}`;
     if (otherIps.length) {
-        result.address += ` / 其他候选 ${otherIps.slice(0, 4).join(', ')}`;
+        result.address += ` / ${otherIps.slice(0, 4).join(', ')}`;
     }
     result.city = geo && geo.city ? geo.city : cityDisplayName(inferCityFromText(result.address));
     result.region = geo ? geo.region : '';
@@ -235,7 +226,6 @@ function chooseWebRtcCandidate(candidates) {
     return chooseScopedWebRtcCandidate(ipv4Candidates)
         || chooseScopedWebRtcCandidate(ipv6Candidates)
         || chooseScopedWebRtcCandidate(publicCandidates)
-        || candidates[0]
         || null;
 }
 
