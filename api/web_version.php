@@ -10,6 +10,7 @@ $root = dirname(__DIR__);
 $files = [
     $root . DIRECTORY_SEPARATOR . 'index.php',
     $root . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . 'config.php',
+    $root . DIRECTORY_SEPARATOR . 'api' . DIRECTORY_SEPARATOR . 'legal_documents.php',
 ];
 $patterns = [
     $root . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . '*.js',

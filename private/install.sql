@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
     failed_login_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
     login_locked_at DATETIME NULL,
     terms_accepted_at DATETIME NULL,
+    cross_border_transfer_accepted_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_users_group_role (group_name, role)
@@ -18,6 +19,8 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS family_groups (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     group_name VARCHAR(100) NOT NULL UNIQUE,
+    group_code VARCHAR(6) NULL UNIQUE,
+    owner_user_id INT UNSIGNED NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -41,6 +44,7 @@ CREATE TABLE IF NOT EXISTS locations (
     role ENUM('monitor', 'guardian') NOT NULL,
     latitude DECIMAL(10, 7) NOT NULL,
     longitude DECIMAL(10, 7) NOT NULL,
+    altitude FLOAT NULL,
     accuracy FLOAT NULL,
     heading FLOAT NULL,
     speed FLOAT NULL,
@@ -59,6 +63,7 @@ CREATE TABLE IF NOT EXISTS latest_group_locations (
     role ENUM('monitor', 'guardian') NOT NULL,
     latitude DECIMAL(10, 7) NOT NULL,
     longitude DECIMAL(10, 7) NOT NULL,
+    altitude FLOAT NULL,
     accuracy FLOAT NULL,
     heading FLOAT NULL,
     speed FLOAT NULL,
@@ -71,4 +76,28 @@ CREATE TABLE IF NOT EXISTS latest_group_locations (
     INDEX idx_latest_location_id (latest_location_id),
     INDEX idx_latest_group_role (group_name, role),
     INDEX idx_latest_updated (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS announcements (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(120) NOT NULL DEFAULT '',
+    body TEXT NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    version INT UNSIGNED NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_announcements_active_updated (is_active, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS invite_codes (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(64) NOT NULL UNIQUE,
+    invite_type ENUM('invite', 'group_create') NOT NULL DEFAULT 'invite',
+    max_uses INT UNSIGNED NOT NULL DEFAULT 1,
+    used_count INT UNSIGNED NOT NULL DEFAULT 0,
+    assigned_group_name VARCHAR(100) NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_invite_codes_active (is_active, invite_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

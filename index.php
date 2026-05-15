@@ -35,6 +35,7 @@ $page = <<<'HTML'
             window.__WEB_ASSET_VERSION__ = version;
             window.AMAP_JS_API_KEY = __AMAP_JS_API_KEY_JSON__;
             window.AMAP_REVERSE_GEOCODE_KEY = __AMAP_REVERSE_GEOCODE_KEY_JSON__;
+            window.CF_TURNSTILE_SITE_KEY = __CF_TURNSTILE_SITE_KEY_JSON__;
             window.AMAP_SERVICE_HOST = new URL(__AMAP_SERVICE_PROXY_PATH_JSON__, window.location.origin).toString().replace(/\/$/, '');
             if (window.AMAP_SERVICE_HOST) {
                 window._AMapSecurityConfig = {
@@ -76,7 +77,18 @@ $page = <<<'HTML'
                         <button id="privacyButton" class="text-link" type="button">隐私条约</button>
                     </span>
                 </div>
+                <div class="terms-field">
+                    <input id="crossBorderAccepted" name="cross_border_transfer_accepted" type="checkbox" value="1" required>
+                    <span>
+                        我已阅读并同意
+                        <button id="crossBorderButton" class="text-link" type="button">用户数据跨境加密传输协议</button>
+                    </span>
+                </div>
+                <div id="turnstileBox" class="turnstile-box" __CF_TURNSTILE_HIDDEN__>
+                    <div class="cf-turnstile" data-sitekey="__CF_TURNSTILE_SITE_KEY_ATTR__" data-callback="onTurnstileSuccess"></div>
+                </div>
                 <button type="submit">登录</button>
+                <button id="registerButton" class="subtle-button full-button" type="button">注册账号</button>
             </form>
         </section>
 
@@ -87,6 +99,7 @@ $page = <<<'HTML'
                     <p id="accountLine"></p>
                 </div>
                 <div class="header-actions">
+                    <button id="announcementButton" class="icon-button" type="button" aria-label="公告" hidden>公告</button>
                     <button id="settingsButton" class="icon-button" type="button" aria-label="设置" hidden>设置</button>
                     <button id="logoutButton" class="icon-button" type="button" aria-label="退出" hidden>退出</button>
                 </div>
@@ -107,6 +120,7 @@ $page = <<<'HTML'
             <section class="control-strip">
                 <div class="control-actions">
                     <button id="reportButton" type="button" hidden>上报位置</button>
+                    <button id="crossGroupSyncButton" class="subtle-button" type="button" hidden>跨组同步</button>
                     <button id="continuousReportButton" class="subtle-button" type="button" hidden>持续上报</button>
                 </div>
                 <span id="liveStatus" class="live-status">正在同步</span>
@@ -168,14 +182,13 @@ $page = <<<'HTML'
             'assets/ip-probe.js',
             'assets/webrtc-probe.js',
             'assets/popup-select.js',
-            'assets/user-agreement.js',
-            'assets/privacy-policy.js',
             'assets/web-version.js',
             'assets/app.js',
         ].forEach((path) => {
             document.write(`<script src="${window.__assetUrl(path)}"><\/script>`);
         });
     </script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </body>
 </html>
 HTML;
@@ -185,12 +198,18 @@ echo str_replace(
         '__AMAP_JS_API_KEY_JSON__',
         '__AMAP_REVERSE_GEOCODE_KEY_JSON__',
         '__AMAP_SERVICE_PROXY_PATH_JSON__',
+        '__CF_TURNSTILE_SITE_KEY_JSON__',
+        '__CF_TURNSTILE_SITE_KEY_ATTR__',
+        '__CF_TURNSTILE_HIDDEN__',
     ],
     [
         json_encode($webAssetVersion, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
         json_encode(AMAP_JS_API_KEY, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
         json_encode(AMAP_REVERSE_GEOCODE_KEY, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
         json_encode(AMAP_SERVICE_PROXY_PATH, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
+        json_encode(CF_TURNSTILE_SITE_KEY, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
+        e(CF_TURNSTILE_SITE_KEY),
+        trim((string) CF_TURNSTILE_SITE_KEY) === '' ? 'hidden' : '',
     ],
     $page
 );
@@ -259,6 +278,7 @@ function web_asset_version(string $root): string
     $files = [
         $root . DIRECTORY_SEPARATOR . 'index.php',
         $root . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . 'config.php',
+        $root . DIRECTORY_SEPARATOR . 'api' . DIRECTORY_SEPARATOR . 'legal_documents.php',
     ];
     $patterns = [
         $root . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . '*.js',

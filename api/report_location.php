@@ -210,8 +210,12 @@ function diagnostics_mobile_ip_uncertain(array $sources): bool
     return false;
 }
 
-function validate_location_measurements(?float $accuracy, ?float $heading, ?float $speed): void
+function validate_location_measurements(?float $accuracy, ?float $heading, ?float $speed, ?float $altitude): void
 {
+    if ($altitude !== null && ($altitude < -500 || $altitude > 12000)) {
+        json_response(['ok' => false, 'message' => '定位高度异常，已拒绝上报。'], 422);
+    }
+
     if ($accuracy !== null && ($accuracy < 0 || $accuracy > MAX_LOCATION_ACCURACY_METERS)) {
         json_response(['ok' => false, 'message' => '定位精度异常，已拒绝上报。'], 422);
     }
@@ -380,6 +384,7 @@ try {
 
     $latitude = input_float('latitude');
     $longitude = input_float('longitude');
+    $altitude = input_float('altitude');
     $accuracy = input_float('accuracy');
     $heading = input_float('heading');
     $speed = input_float('speed');
@@ -391,7 +396,7 @@ try {
     if ($latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180) {
         json_response(['ok' => false, 'message' => '定位经纬度不正确。'], 422);
     }
-    validate_location_measurements($accuracy, $heading, $speed);
+    validate_location_measurements($accuracy, $heading, $speed, $altitude);
 
     $pdo = db();
     $userAgent = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
@@ -408,9 +413,9 @@ try {
 
     $stmt = $pdo->prepare('
         INSERT INTO locations
-            (user_id, group_name, role, latitude, longitude, accuracy, heading, speed, address_diagnostics, address_mismatch, user_agent)
+            (user_id, group_name, role, latitude, longitude, altitude, accuracy, heading, speed, address_diagnostics, address_mismatch, user_agent)
         VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ');
     $stmt->execute([
         (int) $user['id'],
@@ -418,6 +423,7 @@ try {
         normalize_role((string) $membership['role']),
         $latitude,
         $longitude,
+        $altitude,
         $accuracy,
         $heading,
         $speed,
@@ -429,14 +435,15 @@ try {
 
     $stmt = $pdo->prepare('
         INSERT INTO latest_group_locations
-            (user_id, group_name, role, latitude, longitude, accuracy, heading, speed, latest_location_id, address_diagnostics, address_mismatch, updated_at)
+            (user_id, group_name, role, latitude, longitude, altitude, accuracy, heading, speed, latest_location_id, address_diagnostics, address_mismatch, updated_at)
         VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
         ON DUPLICATE KEY UPDATE
             group_name = VALUES(group_name),
             role = VALUES(role),
             latitude = VALUES(latitude),
             longitude = VALUES(longitude),
+            altitude = VALUES(altitude),
             accuracy = VALUES(accuracy),
             heading = VALUES(heading),
             speed = VALUES(speed),
@@ -451,6 +458,7 @@ try {
         normalize_role((string) $membership['role']),
         $latitude,
         $longitude,
+        $altitude,
         $accuracy,
         $heading,
         $speed,

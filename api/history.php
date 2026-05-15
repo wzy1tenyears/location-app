@@ -85,6 +85,7 @@ try {
             l.role,
             l.latitude,
             l.longitude,
+            l.altitude,
             l.accuracy,
             l.heading,
             l.speed,
@@ -120,6 +121,7 @@ try {
             l.role,
             l.latitude,
             l.longitude,
+            l.altitude,
             l.accuracy,
             l.heading,
             l.speed,
@@ -138,11 +140,23 @@ try {
 
     $mapRows = [];
     foreach ($members as $member) {
+        if ($mapPerUser === 20) {
+            $cachedRows = user_history_locations_cache_get((string) $membership['group_name'], (int) $member['user_id']);
+            if (is_array($cachedRows)) {
+                $mapRows = array_merge($mapRows, $cachedRows);
+                continue;
+            }
+        }
+
         $mapStmt->bindValue(1, (string) $membership['group_name'], PDO::PARAM_STR);
         $mapStmt->bindValue(2, (int) $member['user_id'], PDO::PARAM_INT);
         $mapStmt->bindValue(3, $mapPerUser, PDO::PARAM_INT);
         $mapStmt->execute();
-        $mapRows = array_merge($mapRows, $mapStmt->fetchAll());
+        $memberRows = $mapStmt->fetchAll();
+        if ($mapPerUser === 20) {
+            user_history_locations_cache_set((string) $membership['group_name'], (int) $member['user_id'], $memberRows);
+        }
+        $mapRows = array_merge($mapRows, $memberRows);
     }
 
     usort($mapRows, static function (array $left, array $right): int {
@@ -171,6 +185,7 @@ try {
             'group_name' => $row['group_name'],
             'latitude' => (float) $row['latitude'],
             'longitude' => (float) $row['longitude'],
+            'altitude' => $row['altitude'] === null ? null : (float) $row['altitude'],
             'accuracy' => $row['accuracy'] === null ? null : (float) $row['accuracy'],
             'heading' => $row['heading'] === null ? null : (float) $row['heading'],
             'speed' => $row['speed'] === null ? null : (float) $row['speed'],

@@ -51,7 +51,7 @@ public class KeepAliveService extends Service {
     private static final int DEFAULT_REPORT_INTERVAL_SECONDS = 300;
     private static final int NOTIFICATION_ID = 10001;
     private static final String TAG = "位置服务";
-    private static final String USER_AGENT = "loc-app/1.1.6";
+    private static final String USER_AGENT = "loc-app/1.1.8";
 
     private Handler handler;
     private LocationManager locationManager;
@@ -399,6 +399,10 @@ public class KeepAliveService extends Service {
                     body.put("group_name", target.groupName);
                     body.put("latitude", location.getLatitude());
                     body.put("longitude", location.getLongitude());
+
+                    if (location.hasAltitude()) {
+                        body.put("altitude", location.getAltitude());
+                    }
 
                     if (location.hasAccuracy()) {
                         body.put("accuracy", location.getAccuracy());

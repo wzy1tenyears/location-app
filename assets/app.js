@@ -35,6 +35,8 @@ const state = {
     historyMapPageSize: 20,
     historyPagination: null,
     addressDiagnostics: null,
+    announcement: null,
+    legalDocuments: null,
 };
 
 const el = {
@@ -47,11 +49,17 @@ const el = {
     termsAccepted: document.querySelector('#termsAccepted'),
     termsButton: document.querySelector('#termsButton'),
     privacyButton: document.querySelector('#privacyButton'),
+    crossBorderAccepted: document.querySelector('#crossBorderAccepted'),
+    crossBorderButton: document.querySelector('#crossBorderButton'),
+    registerButton: document.querySelector('#registerButton'),
+    turnstileBox: document.querySelector('#turnstileBox'),
     appTitle: document.querySelector('#appTitle'),
     accountLine: document.querySelector('#accountLine'),
+    announcementButton: document.querySelector('#announcementButton'),
     settingsButton: document.querySelector('#settingsButton'),
     logoutButton: document.querySelector('#logoutButton'),
     reportButton: document.querySelector('#reportButton'),
+    crossGroupSyncButton: document.querySelector('#crossGroupSyncButton'),
     continuousReportButton: document.querySelector('#continuousReportButton'),
     groupSelect: document.querySelector('#groupSelect'),
     liveStatus: document.querySelector('#liveStatus'),
@@ -149,6 +157,38 @@ function showSimplePopup(title, paragraphs, options = {}) {
         title: '',
         paragraphs: Array.isArray(paragraphs) ? paragraphs : [String(paragraphs || '')],
     }], options);
+}
+
+async function loadLegalDocuments() {
+    if (state.legalDocuments) {
+        return state.legalDocuments;
+    }
+
+    const payload = await api('legal_documents', { method: 'GET' });
+    state.legalDocuments = payload.documents || {};
+    return state.legalDocuments;
+}
+
+async function showLegalDocument(type, fallbackTitle, options = {}) {
+    try {
+        const documents = await loadLegalDocuments();
+        const documentData = documents[type] || {};
+        showDocumentPopup(documentData.title || fallbackTitle, documentData.sections || [], options);
+    } catch (error) {
+        showSimplePopup('加载失败', error.message || '协议内容暂时无法加载。');
+    }
+}
+
+async function showCombinedLegalDocuments() {
+    try {
+        const documents = await loadLegalDocuments();
+        showDocumentPopup('用户协议与隐私条约', [
+            ...((documents.user_agreement && documents.user_agreement.sections) || []),
+            ...((documents.privacy_policy && documents.privacy_policy.sections) || []),
+        ]);
+    } catch (error) {
+        showSimplePopup('加载失败', error.message || '协议内容暂时无法加载。');
+    }
 }
 
 function openInlinePopupDialog(title, sections, options = {}) {
@@ -268,12 +308,18 @@ function showLogin(message = '') {
     state.selectedHistoryId = null;
     el.reportButton.hidden = true;
     el.reportButton.disabled = false;
+    if (el.crossGroupSyncButton) {
+        el.crossGroupSyncButton.hidden = true;
+    }
     el.continuousReportButton.hidden = true;
     el.continuousReportButton.disabled = false;
     updateContinuousReportButton();
     el.logoutButton.hidden = true;
     if (el.settingsButton) {
         el.settingsButton.hidden = true;
+    }
+    if (el.announcementButton) {
+        el.announcementButton.hidden = true;
     }
     el.mainView.hidden = true;
     el.loginView.hidden = false;
@@ -291,6 +337,12 @@ function showMain(user) {
     if (el.settingsButton) {
         el.settingsButton.hidden = false;
     }
+    if (el.announcementButton) {
+        el.announcementButton.hidden = false;
+    }
+    if (el.crossGroupSyncButton) {
+        el.crossGroupSyncButton.hidden = false;
+    }
     initMap();
     startRefresh();
     applySelectedGroup(preferredGroupName(user), false);
@@ -298,6 +350,7 @@ function showMain(user) {
     refreshHistory();
     syncAutoReportWatch();
     checkFineLocationPermission();
+    refreshAnnouncement(true);
 }
 
 function preferredGroupName(user) {
@@ -532,6 +585,48 @@ function showPreciseLocationRequiredPopup(requestAgain = true) {
     });
 }
 
+function localDateKey(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+async function refreshAnnouncement(autoShow = false) {
+    if (!state.user) {
+        return;
+    }
+
+    try {
+        const payload = await api('announcement', { method: 'GET' });
+        state.announcement = payload.announcement || null;
+        if (el.announcementButton) {
+            el.announcementButton.hidden = !state.announcement;
+        }
+        if (autoShow && state.announcement) {
+            const key = `announcement_seen_${state.announcement.id}_${state.announcement.version}`;
+            if (window.localStorage.getItem(key) !== '1') {
+                showAnnouncementPopup();
+                window.localStorage.setItem(key, '1');
+            }
+        }
+    } catch (error) {
+        console.warn(error);
+    }
+}
+
+function showAnnouncementPopup() {
+    if (!state.announcement) {
+        showSimplePopup('公告', '暂无公告。');
+        return;
+    }
+
+    showDocumentPopup(state.announcement.title || '公告', [{
+        title: '',
+        paragraphs: String(state.announcement.body || '').split(/\r?\n/).filter(Boolean),
+    }]);
+}
+
 function openSettingsPopup() {
     const overlay = document.createElement('div');
     overlay.className = 'popup-select-overlay';
@@ -567,7 +662,88 @@ function openSettingsPopup() {
     themeSelect.addEventListener('change', () => applyThemeMode(themeSelect.value));
     themeLabel.append(themeTitle, themeSelect);
 
-    body.append(themeLabel);
+    const joinLabel = document.createElement('label');
+    joinLabel.className = 'settings-field';
+    const joinTitle = document.createElement('span');
+    joinTitle.textContent = '通过组号加入家庭组';
+    const joinRow = document.createElement('div');
+    joinRow.className = 'settings-inline-row';
+    const joinInput = document.createElement('input');
+    joinInput.placeholder = '6 位组号';
+    joinInput.maxLength = 6;
+    const joinButton = document.createElement('button');
+    joinButton.type = 'button';
+    joinButton.className = 'subtle-button';
+    joinButton.textContent = '加入';
+    joinButton.addEventListener('click', async () => {
+        joinButton.disabled = true;
+        try {
+            const payload = await api('groups', {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'join_by_code',
+                    group_code: joinInput.value,
+                }),
+            });
+            state.user = payload.user;
+            renderGroupSelect();
+            applySelectedGroup(preferredGroupName(state.user), true);
+            showSimplePopup('加入成功', '已加入家庭组。');
+        } catch (error) {
+            showSimplePopup('加入失败', error.message);
+        } finally {
+            joinButton.disabled = false;
+        }
+    });
+    joinRow.append(joinInput, joinButton);
+    joinLabel.append(joinTitle, joinRow);
+
+    body.append(themeLabel, joinLabel);
+
+    const ownedGroups = userGroups().filter((group) => Number(group.owner_user_id || 0) === Number(state.user && state.user.id));
+    if (ownedGroups.length) {
+        const ownerTitle = document.createElement('h3');
+        ownerTitle.textContent = '我的家庭组管理';
+        body.append(ownerTitle);
+        ownedGroups.forEach((group) => {
+            const groupLabel = document.createElement('label');
+            groupLabel.className = 'settings-field';
+            const title = document.createElement('span');
+            title.textContent = `${group.group_name} / 组号 ${group.group_code || '未生成'}`;
+            const row = document.createElement('div');
+            row.className = 'settings-inline-row';
+            const input = document.createElement('input');
+            input.value = group.group_name;
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'subtle-button';
+            button.textContent = '改名';
+            button.addEventListener('click', async () => {
+                button.disabled = true;
+                try {
+                    const payload = await api('groups', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            action: 'rename_group',
+                            group_id: group.id,
+                            group_name: input.value,
+                        }),
+                    });
+                    state.user = payload.user;
+                    renderGroupSelect();
+                    applySelectedGroup(input.value, true);
+                    showSimplePopup('保存成功', '家庭组名称已更新。');
+                } catch (error) {
+                    showSimplePopup('保存失败', error.message);
+                } finally {
+                    button.disabled = false;
+                }
+            });
+            row.append(input, button);
+            groupLabel.append(title, row);
+            body.append(groupLabel);
+        });
+    }
 
     const actions = document.createElement('div');
     actions.className = 'popup-dialog-actions';
@@ -632,6 +808,93 @@ function setGuardianContinuousReportingForGroup(groupName, enabled) {
 
 function guardianContinuousStorageKey(groupName) {
     return `guardian_continuous_${state.user.id}_${encodeURIComponent(groupName)}`;
+}
+
+function crossSyncStorageKey() {
+    return state.user ? `cross_group_sync_${state.user.id}` : 'cross_group_sync';
+}
+
+function selectedCrossSyncGroups() {
+    if (!state.user) {
+        return [];
+    }
+
+    try {
+        const values = JSON.parse(window.localStorage.getItem(crossSyncStorageKey()) || '[]');
+        const available = new Set(userGroups().map((group) => group.group_name));
+        return Array.isArray(values) ? values.filter((groupName) => available.has(groupName)) : [];
+    } catch (error) {
+        return [];
+    }
+}
+
+function setSelectedCrossSyncGroups(groupNames) {
+    window.localStorage.setItem(crossSyncStorageKey(), JSON.stringify([...new Set(groupNames.filter(Boolean))]));
+}
+
+function openCrossGroupSyncPopup() {
+    const groups = userGroups().filter((group) => group.group_name !== state.selectedGroupName);
+    if (!groups.length) {
+        showSimplePopup('跨组同步', '当前账号没有其他家庭组。');
+        return;
+    }
+
+    const selected = new Set(selectedCrossSyncGroups());
+    const overlay = document.createElement('div');
+    overlay.className = 'popup-select-overlay';
+
+    const card = document.createElement('div');
+    card.className = 'popup-select-card popup-dialog-card';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
+
+    const heading = document.createElement('h2');
+    heading.textContent = '跨组同步';
+    const body = document.createElement('div');
+    body.className = 'popup-dialog-body settings-dialog-body';
+
+    groups.forEach((group) => {
+        const label = document.createElement('label');
+        label.className = 'settings-check-field';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = group.group_name;
+        input.checked = selected.has(group.group_name);
+        const text = document.createElement('span');
+        text.textContent = `${group.group_name} / ${group.role_label}`;
+        label.append(input, text);
+        body.append(label);
+    });
+
+    const actions = document.createElement('div');
+    actions.className = 'popup-dialog-actions';
+    const saveButton = document.createElement('button');
+    saveButton.type = 'button';
+    saveButton.textContent = '保存';
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'subtle-button';
+    closeButton.textContent = '关闭';
+    const close = () => {
+        overlay.classList.remove('is-visible');
+        window.setTimeout(() => overlay.remove(), 200);
+    };
+    saveButton.addEventListener('click', () => {
+        const checked = Array.from(body.querySelectorAll('input[type="checkbox"]:checked')).map((input) => input.value);
+        setSelectedCrossSyncGroups(checked);
+        close();
+    });
+    closeButton.addEventListener('click', close);
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+            close();
+        }
+    });
+    actions.append(saveButton, closeButton);
+    card.append(heading, body, actions);
+    overlay.append(card);
+    document.body.append(overlay);
+    window.requestAnimationFrame(() => overlay.classList.add('is-visible'));
 }
 
 function amapApiKey() {
@@ -856,8 +1119,9 @@ async function reportPosition(position, automatic = false) {
         return;
     }
 
-    const { latitude, longitude, accuracy, heading, speed } = position.coords;
+    const { latitude, longitude, altitude, accuracy, heading, speed } = position.coords;
     const reportGroupName = state.selectedGroupName;
+    const extraGroupNames = automatic ? [] : selectedCrossSyncGroups().filter((groupName) => groupName !== reportGroupName);
 
     try {
         if (!automatic) {
@@ -923,6 +1187,7 @@ async function reportPosition(position, automatic = false) {
                 group_name: reportGroupName,
                 latitude,
                 longitude,
+                altitude,
                 accuracy,
                 heading,
                 speed,
@@ -931,6 +1196,22 @@ async function reportPosition(position, automatic = false) {
             }),
         });
         locationId = Number(report.location_id) || null;
+        for (const groupName of extraGroupNames) {
+            await api('report_location', {
+                method: 'POST',
+                body: JSON.stringify({
+                    group_name: groupName,
+                    latitude,
+                    longitude,
+                    altitude,
+                    accuracy,
+                    heading,
+                    speed,
+                    address_diagnostics: addressDiagnostics,
+                    address_mismatch: addressDiagnostics.mismatch,
+                }),
+            });
+        }
         flushDiagnostics();
 
         setStatus(addressDiagnostics.complete ? '位置已上报' : '位置已上报，地址继续探测中');
@@ -1272,6 +1553,7 @@ function renderHistoryDetails(location) {
     const rows = [
         ['家庭组', location.group_name || '未知'],
         ['坐标', formatCoord(location)],
+        ['高度', location.altitude === null || location.altitude === undefined ? '未知' : `${Math.round(Number(location.altitude))}m`],
         ['精度', location.accuracy === null ? '未知' : `${Math.round(location.accuracy)}m`],
         ['地址状态', addressDiagnosticsStatusText(diagnostics)],
     ];
@@ -2203,7 +2485,10 @@ function formatCoord(location) {
     const coordinates = locationDisplayCoordinates(location);
     const sourceLabel = coordinates.source ? ` / ${coordinates.source.name || '探测位置'}` : '';
     const accuracy = !coordinates.source && location.accuracy !== null ? ` / 精度 ${Math.round(location.accuracy)}m` : '';
-    return `${coordinates.latitude.toFixed(6)}, ${coordinates.longitude.toFixed(6)}${sourceLabel}${accuracy}`;
+    const altitude = !coordinates.source && location.altitude !== null && location.altitude !== undefined
+        ? ` / 高度 ${Math.round(Number(location.altitude))}m`
+        : '';
+    return `${coordinates.latitude.toFixed(6)}, ${coordinates.longitude.toFixed(6)}${sourceLabel}${altitude}${accuracy}`;
 }
 
 function renderMarkers(locations) {
@@ -2492,19 +2777,266 @@ function escapeHtml(value) {
         .replace(/'/g, '&#039;');
 }
 
+function openRegisterPopup() {
+    const overlay = document.createElement('div');
+    overlay.className = 'popup-select-overlay';
+    const card = document.createElement('div');
+    card.className = 'popup-select-card popup-dialog-card';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
+
+    const heading = document.createElement('h2');
+    heading.textContent = '注册账号';
+    const body = document.createElement('form');
+    body.className = 'popup-dialog-body settings-dialog-body';
+
+    const inputs = {};
+
+    function addField(name, labelText, placeholder, type = 'text') {
+        const label = document.createElement('label');
+        label.className = 'settings-field';
+        const span = document.createElement('span');
+        span.textContent = labelText;
+        const input = document.createElement('input');
+        input.name = name;
+        input.type = type;
+        input.placeholder = placeholder;
+        inputs[name] = input;
+        label.append(span, input);
+        body.append(label);
+        return label;
+    }
+
+    addField('username', '用户名', '至少 6 位，包含英文和数字');
+    addField('password', '密码', '至少 6 位', 'password');
+    addField('display_name', '显示名称', '留空时使用用户名');
+    addField('invite_code', '邀请码', '输入 6 位邀请码后自动检测');
+    inputs.invite_code.maxLength = 6;
+    inputs.invite_code.autocomplete = 'one-time-code';
+
+    const inviteStatus = document.createElement('div');
+    inviteStatus.className = 'message subtle-message';
+    inviteStatus.textContent = '显示名称留空时，注册后会显示用户名。';
+    body.append(inviteStatus);
+
+    const groupNameLabel = addField('group_name', '家庭组名称', '填写要使用的家庭组名称');
+    groupNameLabel.hidden = true;
+    const groupCodeLabel = addField('group_code', '家庭组号', '填写 6 位家庭组号');
+    groupCodeLabel.hidden = true;
+    inputs.group_code.maxLength = 6;
+
+    const message = document.createElement('div');
+    message.className = 'message';
+    message.hidden = true;
+    body.append(message);
+
+    let inviteCheck = null;
+    let inviteChecking = false;
+    let inviteCheckTimer = null;
+
+    function setInviteStatus(text, ok = false) {
+        inviteStatus.textContent = text;
+        inviteStatus.classList.toggle('success-message', ok);
+    }
+
+    function resetInviteCheck(text = '显示名称留空时，注册后会显示用户名。') {
+        inviteCheck = null;
+        groupNameLabel.hidden = true;
+        groupCodeLabel.hidden = true;
+        inputs.group_name.value = '';
+        inputs.group_code.value = '';
+        setInviteStatus(text, false);
+    }
+
+    async function checkInviteCodeNow() {
+        const code = inputs.invite_code.value.trim().toLowerCase();
+        inputs.invite_code.value = code;
+        if (code.length !== 6) {
+            resetInviteCheck('请输入 6 位邀请码。');
+            return null;
+        }
+
+        inviteChecking = true;
+        setInviteStatus('正在检测邀请码...', false);
+        try {
+            const payload = await api('invite_check', {
+                method: 'POST',
+                body: JSON.stringify({ code }),
+            });
+            inviteCheck = {
+                code,
+                requiresGroupName: !!payload.requires_group_name,
+                requiresGroupCode: !!payload.requires_group_code,
+            };
+            groupNameLabel.hidden = !inviteCheck.requiresGroupName;
+            groupCodeLabel.hidden = !inviteCheck.requiresGroupCode;
+            if (!inviteCheck.requiresGroupName) {
+                inputs.group_name.value = '';
+            }
+            if (!inviteCheck.requiresGroupCode) {
+                inputs.group_code.value = '';
+            }
+            setInviteStatus(
+                inviteCheck.requiresGroupName || inviteCheck.requiresGroupCode
+                    ? '邀请码可用，请补充下方信息。'
+                    : '邀请码可用，可以注册。',
+                true
+            );
+            return inviteCheck;
+        } catch (error) {
+            resetInviteCheck(error.message || '邀请码检测失败。');
+            return null;
+        } finally {
+            inviteChecking = false;
+        }
+    }
+
+    inputs.invite_code.addEventListener('input', () => {
+        const value = inputs.invite_code.value.trim().toLowerCase().replace(/[^0-9a-z]/g, '').slice(0, 6);
+        inputs.invite_code.value = value;
+        window.clearTimeout(inviteCheckTimer);
+        if (value.length === 6) {
+            inviteCheckTimer = window.setTimeout(checkInviteCodeNow, 180);
+        } else {
+            resetInviteCheck(value === '' ? '显示名称留空时，注册后会显示用户名。' : '邀请码达到 6 位后会自动检测。');
+        }
+    });
+
+    const actions = document.createElement('div');
+    actions.className = 'popup-dialog-actions';
+    const submitButton = document.createElement('button');
+    submitButton.type = 'submit';
+    submitButton.textContent = '注册';
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'subtle-button';
+    closeButton.textContent = '关闭';
+    const close = () => {
+        overlay.classList.remove('is-visible');
+        window.setTimeout(() => overlay.remove(), 200);
+    };
+    closeButton.addEventListener('click', close);
+    body.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        message.hidden = true;
+        submitButton.disabled = true;
+        try {
+            const username = inputs.username.value.trim();
+            const code = inputs.invite_code.value.trim().toLowerCase();
+            let currentInviteCheck = inviteCheck && inviteCheck.code === code ? inviteCheck : null;
+            if (!currentInviteCheck && !inviteChecking) {
+                currentInviteCheck = await checkInviteCodeNow();
+            }
+            if (!currentInviteCheck) {
+                throw new Error('请先填写有效的邀请码。');
+            }
+            if (currentInviteCheck.requiresGroupName && inputs.group_name.value.trim() === '') {
+                throw new Error('请填写家庭组名称。');
+            }
+            if (currentInviteCheck.requiresGroupCode && !/^[0-9a-z]{6}$/.test(inputs.group_code.value.trim().toLowerCase())) {
+                throw new Error('请填写 6 位家庭组号。');
+            }
+
+            const payload = await api('register', {
+                method: 'POST',
+                body: JSON.stringify({
+                    username,
+                    password: inputs.password.value,
+                    display_name: inputs.display_name.value.trim() || username,
+                    invite_code: code,
+                    group_name: inputs.group_name.value,
+                    group_code: inputs.group_code.value.trim().toLowerCase(),
+                    terms_accepted: !!(el.termsAccepted && el.termsAccepted.checked),
+                    cross_border_transfer_accepted: !!(el.crossBorderAccepted && el.crossBorderAccepted.checked),
+                    turnstile_token: turnstileToken(),
+                }),
+            });
+            close();
+            showMain(payload.user);
+        } catch (error) {
+            message.textContent = error.message;
+            message.hidden = false;
+            resetTurnstile();
+        } finally {
+            submitButton.disabled = false;
+        }
+    });
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+            close();
+        }
+    });
+    actions.append(submitButton, closeButton);
+    card.append(heading, body, actions);
+    overlay.append(card);
+    document.body.append(overlay);
+    window.requestAnimationFrame(() => overlay.classList.add('is-visible'));
+}
+
 if (el.termsButton) {
-    el.termsButton.addEventListener('click', () => showDocumentPopup('用户协议', window.USER_AGREEMENT_SECTIONS || []));
+    el.termsButton.addEventListener('click', () => showLegalDocument('user_agreement', '用户协议'));
 }
 if (el.privacyButton) {
-    el.privacyButton.addEventListener('click', () => showDocumentPopup('隐私条约', window.PRIVACY_POLICY_SECTIONS || []));
+    el.privacyButton.addEventListener('click', () => showLegalDocument('privacy_policy', '隐私条约'));
+}
+if (el.crossBorderButton) {
+    el.crossBorderButton.addEventListener('click', () => showLegalDocument('cross_border_transfer', '用户数据跨境加密传输协议'));
 }
 if (el.settingsButton) {
     el.settingsButton.addEventListener('click', openSettingsPopup);
+}
+if (el.announcementButton) {
+    el.announcementButton.addEventListener('click', showAnnouncementPopup);
+}
+if (el.registerButton) {
+    el.registerButton.addEventListener('click', openRegisterPopup);
+}
+
+window.onTurnstileSuccess = (token) => {
+    window.__turnstileToken = token;
+};
+
+function turnstileToken() {
+    if (!String(window.CF_TURNSTILE_SITE_KEY || '').trim()) {
+        return '';
+    }
+
+    if (window.turnstile && el.turnstileBox) {
+        const response = window.turnstile.getResponse();
+        if (response) {
+            return response;
+        }
+    }
+
+    return String(window.__turnstileToken || '');
+}
+
+function resetTurnstile() {
+    try {
+        if (window.turnstile && el.turnstileBox) {
+            window.turnstile.reset();
+        }
+    } catch (error) {
+        console.warn(error);
+    }
+    window.__turnstileToken = '';
 }
 
 el.loginForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     el.loginMessage.hidden = true;
+
+    if (el.termsAccepted && !el.termsAccepted.checked) {
+        await showCombinedLegalDocuments();
+        return;
+    }
+
+    if (el.crossBorderAccepted && !el.crossBorderAccepted.checked) {
+        await showLegalDocument('cross_border_transfer', '用户数据跨境加密传输协议', {
+            closeText: '我知道了',
+        });
+        return;
+    }
 
     try {
         const payload = await api('login', {
@@ -2513,10 +3045,15 @@ el.loginForm.addEventListener('submit', async (event) => {
                 username: el.username.value,
                 password: el.password.value,
                 terms_accepted: !!(el.termsAccepted && el.termsAccepted.checked),
+                cross_border_transfer_accepted: !!(el.crossBorderAccepted && el.crossBorderAccepted.checked),
+                turnstile_token: turnstileToken(),
             }),
         });
 
         el.password.value = '';
+        if (!payload.user && !payload.redirect) {
+            return;
+        }
         if (payload.redirect) {
             window.location.href = payload.redirect;
             return;
@@ -2526,6 +3063,7 @@ el.loginForm.addEventListener('submit', async (event) => {
     } catch (error) {
         el.loginMessage.textContent = error.message;
         el.loginMessage.hidden = false;
+        resetTurnstile();
     }
 });
 
@@ -2538,6 +3076,9 @@ el.logoutButton.addEventListener('click', async () => {
 });
 
 el.reportButton.addEventListener('click', manualReport);
+if (el.crossGroupSyncButton) {
+    el.crossGroupSyncButton.addEventListener('click', openCrossGroupSyncPopup);
+}
 el.continuousReportButton.addEventListener('click', toggleGuardianContinuousReport);
 el.groupSelect.addEventListener('change', () => applySelectedGroup(el.groupSelect.value, true));
 el.historyRefreshButton.addEventListener('click', refreshHistory);

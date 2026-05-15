@@ -1,25 +1,17 @@
-# Android 客户端
+# Android 客户端源码
 
-这是不用 Android Studio 的原生 Android WebView 客户端。它会打开你的服务器用户端页面，也就是网站根目录 `/`。
+这里仅保留 Android WebView 客户端源码，不随 GitHub 发布版提供 APK、签名文件或打包脚本。
 
 ## 目录
 
-- `AndroidManifest.xml`：Android 权限和入口 Activity
-- `src/com/familylocation/client/MainActivity.java`：客户端代码
-- `build.ps1`：不用 Gradle 的命令行 APK 构建脚本
+- `AndroidManifest.xml`：Android 权限和入口 Activity。
+- `src/com/familylocation/client/MainActivity.java`：主界面、WebView、更新和权限逻辑。
+- `src/com/familylocation/client/KeepAliveService.java`：后台定位服务。
+- `assets/server-url.txt`：服务器地址示例文件，打包前请改成你自己的 HTTPS 地址。
+- `res/drawable/app_icon.png`：应用图标，打包前可替换。
 
-## 构建方式
+## 打包说明
 
-先安装 JDK 和 Android SDK，并设置 `ANDROID_HOME` 或 `ANDROID_SDK_ROOT`；也可以直接传入 `-SdkRoot`。
+如需生成 APK，请自行使用 Android SDK/Gradle 或你自己的构建流程打包，并自行处理签名、混淆和发布审查。
 
-在 `android-client` 目录运行，例如：
-
-```powershell
-.\build.ps1 -SdkRoot D:\Android\Sdk
-```
-
-输出 APK：
-
-```text
-android-client\build\FamilyLocation-debug.apk
-```
+因防止滥用，本项目不提供可直接安装的 APK release。

@@ -159,7 +159,7 @@
         }
     }, true);
 
-    document.querySelectorAll('form[data-confirm]').forEach((form) => {
+    function bindConfirmForm(form) {
         form.addEventListener('submit', (event) => {
             if (form.dataset.confirmed === '1') {
                 form.dataset.confirmed = '';
@@ -171,6 +171,83 @@
                 form.dataset.confirmed = '1';
                 form.requestSubmit();
             });
+        });
+    }
+
+    function openDetailsModal(details) {
+        const summary = details.querySelector('summary');
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-overlay';
+
+        const dialog = document.createElement('div');
+        dialog.className = 'confirm-dialog details-dialog';
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+
+        const title = document.createElement('h2');
+        title.textContent = summary ? summary.textContent.trim() : '更多操作';
+
+        const body = document.createElement('div');
+        body.className = 'details-dialog-body';
+        Array.from(details.childNodes).forEach((node) => {
+            if (node === summary) {
+                return;
+            }
+            body.append(node.cloneNode(true));
+        });
+        body.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
+
+        const actions = document.createElement('div');
+        actions.className = 'confirm-actions';
+        const closeButton = document.createElement('button');
+        closeButton.type = 'button';
+        closeButton.className = 'secondary';
+        closeButton.textContent = '关闭';
+        let closing = false;
+        const close = () => {
+            if (closing) {
+                return;
+            }
+            closing = true;
+            document.removeEventListener('keydown', onKeydown);
+            overlay.classList.remove('is-visible');
+            window.setTimeout(() => overlay.remove(), 200);
+        };
+        closeButton.addEventListener('click', close);
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) {
+                close();
+            }
+        });
+        function onKeydown(event) {
+            if (!document.body.contains(overlay)) {
+                document.removeEventListener('keydown', onKeydown);
+                return;
+            }
+            if (event.key === 'Escape') {
+                close();
+            }
+        }
+        document.addEventListener('keydown', onKeydown);
+        actions.append(closeButton);
+        dialog.append(title, body, actions);
+        overlay.append(dialog);
+        document.body.append(overlay);
+        window.requestAnimationFrame(() => overlay.classList.add('is-visible'));
+    }
+
+    document.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
+
+    document.querySelectorAll('details.row-more > summary').forEach((summary) => {
+        summary.addEventListener('click', (event) => {
+            const details = summary.parentElement;
+            if (!details || details.classList.contains('installed-apps-details') || details.classList.contains('history-more')) {
+                return;
+            }
+
+            event.preventDefault();
+            details.open = false;
+            openDetailsModal(details);
         });
     });
 })();

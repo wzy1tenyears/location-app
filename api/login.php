@@ -14,10 +14,14 @@ try {
     $username = input_string('username', 64);
     $password = input_string('password', 255);
     $termsAccepted = input_bool('terms_accepted');
+    $crossBorderAccepted = input_bool('cross_border_transfer_accepted');
+    $turnstileToken = input_string('turnstile_token', 4096);
 
     if ($username === '' || $password === '') {
         json_response(['ok' => false, 'message' => '请输入账号和密码。'], 422);
     }
+
+    verify_turnstile_token($turnstileToken);
 
     if (hash_equals(ADMIN_USERNAME, $username)) {
         if (!hash_equals(ADMIN_PASSWORD, $password)) {
@@ -59,6 +63,9 @@ try {
     if (!$termsAccepted) {
         json_response(['ok' => false, 'message' => '请先同意用户协议和隐私条约。'], 403);
     }
+    if (!$crossBorderAccepted) {
+        json_response(['ok' => false, 'message' => '请先同意用户数据跨境加密传输协议。'], 403);
+    }
 
     session_regenerate_id(true);
     $_SESSION['user_id'] = (int) $user['id'];
@@ -68,6 +75,11 @@ try {
         $stmt->execute([(int) $user['id']]);
         $user['terms_accepted_at'] = date('Y-m-d H:i:s');
     }
+    if (!user_cross_border_transfer_accepted($user)) {
+        $stmt = $pdo->prepare('UPDATE users SET cross_border_transfer_accepted_at = NOW() WHERE id = ?');
+        $stmt->execute([(int) $user['id']]);
+        $user['cross_border_transfer_accepted_at'] = date('Y-m-d H:i:s');
+    }
 
     json_response([
         'ok' => true,
@@ -75,4 +87,35 @@ try {
     ]);
 } catch (Throwable $th) {
     json_response(['ok' => false, 'message' => api_error_message($th)], 500);
+}
+
+function verify_turnstile_token(string $token): void
+{
+    if (!defined('CF_TURNSTILE_SECRET_KEY') || trim((string) CF_TURNSTILE_SECRET_KEY) === '') {
+        return;
+    }
+
+    if ($token === '') {
+        json_response(['ok' => false, 'message' => '请先完成人机验证。'], 403);
+    }
+
+    $payload = http_build_query([
+        'secret' => CF_TURNSTILE_SECRET_KEY,
+        'response' => $token,
+        'remoteip' => $_SERVER['REMOTE_ADDR'] ?? '',
+    ]);
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/x-www-form-urlencoded\r\n",
+            'content' => $payload,
+            'timeout' => 8,
+        ],
+    ]);
+
+    $response = @file_get_contents('https://challenges.cloudflare.com/turnstile/v0/siteverify', false, $context);
+    $decoded = is_string($response) ? json_decode($response, true) : null;
+    if (!is_array($decoded) || empty($decoded['success'])) {
+        json_response(['ok' => false, 'message' => '人机验证失败，请重试。'], 403);
+    }
 }

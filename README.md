@@ -50,9 +50,9 @@ const AMAP_SERVICE_PROXY_PATH = '/_AMapService';
 
 同时把 `nginx-location.conf` 中的 `/_AMapService` 规则放入站点 `server { ... }`，并把 `你的高德安全密钥` 替换成真实值。
 
-## Android 打包前准备
+## Android 客户端准备
 
-打包软件前先准备两件事：
+GitHub 发布版只保留 Android 客户端源码，不提供 APK、签名文件或打包脚本。打包软件前先准备两件事：
 
 1. 导入应用图标
 
@@ -81,7 +81,7 @@ https://example.com/
 - `assets/`：用户端前端资源。
 - `admin/`：后台管理源码目录，实际目录名可通过 `private/config.php` 配置。
 - `private/`：配置文件、公共库和数据库初始化文件，禁止公网访问。
-- `android-client/`：Android WebView 客户端源码和构建脚本。
+- `android-client/`：Android WebView 客户端源码。
 - `nginx-location.conf`：Nginx 站点规则片段。
 
 ## 部署流程
@@ -148,28 +148,6 @@ https://example.com/admin/
 ```
 
 如果访问时没有末尾 `/`，入口会自动跳转到带 `/` 的地址，避免后台 CSS 和 JS 相对路径加载失败。
-
-## 构建 Android 客户端
-
-进入：
-
-```text
-android-client/
-```
-
-运行：
-
-```powershell
-.\build.ps1
-```
-
-如需指定 Android SDK：
-
-```powershell
-.\build.ps1 -SdkRoot F:\android
-```
-
-构建输出在 `android-client/build/` 下。
 
 ## 安全说明
 

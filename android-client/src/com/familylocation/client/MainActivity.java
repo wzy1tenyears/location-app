@@ -65,8 +65,8 @@ public class MainActivity extends Activity {
     private static final int REQUEST_LOCATION = 1001;
     private static final int REQUEST_NOTIFICATION = 1002;
     private static final int REQUEST_BACKGROUND_LOCATION = 1003;
-    private static final int APP_VERSION_CODE = 21;
-    private static final String APP_VERSION_NAME = "1.1.6";
+    private static final int APP_VERSION_CODE = 23;
+    private static final String APP_VERSION_NAME = "1.1.8";
     private static final String PREFS = "family_location";
     private static final String KEY_SERVER_URL = "server_url";
     private static final String KEY_USER_ROLE = "user_role";
@@ -678,7 +678,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setLoadWithOverviewMode(false);
         settings.setUseWideViewPort(false);
-        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
+        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -690,7 +690,6 @@ public class MainActivity extends Activity {
             settings.setUserAgentString((userAgent == null ? "" : userAgent) + " loc-app/" + APP_VERSION_NAME);
         }
         webView.addJavascriptInterface(new LocationBridge(), "LocationBridge");
-        webView.clearCache(true);
 
         webView.setWebViewClient(new WebViewClient() {
             @Override

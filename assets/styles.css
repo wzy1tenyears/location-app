@@ -137,6 +137,14 @@ label {
     transform: none;
 }
 
+.full-button {
+    width: 100%;
+}
+
+.turnstile-box {
+    min-height: 65px;
+}
+
 input,
 select {
     appearance: none;
@@ -304,6 +312,13 @@ select:focus {
 .settings-field {
     display: grid;
     gap: 8px;
+}
+
+.settings-inline-row {
+    align-items: center;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .settings-check-field {

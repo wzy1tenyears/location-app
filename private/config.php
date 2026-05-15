@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 const APP_NAME = '位置';
-const ANDROID_VERSION_CODE = 1;
-const ANDROID_VERSION_NAME = '1.0.0';
+const ANDROID_VERSION_CODE = 23;
+const ANDROID_VERSION_NAME = '1.1.8';
 const ANDROID_APK_FILENAME = 'location-release.apk';
 const ANDROID_FORCE_UPDATE = true;
 const IPINFO_LITE_TOKEN = ''; // https://ipinfo.io/
@@ -26,6 +26,10 @@ const REDIS_DB = 0;
 const REDIS_USERNAME = '';
 const REDIS_PASSWORD = '';
 const REDIS_CACHE_TTL_SECONDS = 15;
+const REDIS_USER_HISTORY_TTL_SECONDS = 86400;
+
+const CF_TURNSTILE_SITE_KEY = '';
+const CF_TURNSTILE_SECRET_KEY = '';
 
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = 'password';

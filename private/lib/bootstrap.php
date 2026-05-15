@@ -163,6 +163,108 @@ function latest_locations_cache_forget_all(): void
     }
 
     $redis->incr(redis_cache_prefix() . 'latest_locations_version');
+    $redis->incr(redis_cache_prefix() . 'user_history_locations_version');
+}
+
+function user_history_locations_cache_version(): string
+{
+    $redis = redis_client();
+    if (!$redis) {
+        return '0';
+    }
+
+    $version = $redis->get(redis_cache_prefix() . 'user_history_locations_version');
+    return is_string($version) && $version !== '' ? $version : '0';
+}
+
+function user_history_locations_cache_key(string $groupName, int $userId): string
+{
+    return redis_cache_prefix()
+        . 'user_history_locations:'
+        . user_history_locations_cache_version()
+        . ':'
+        . hash('sha256', $groupName)
+        . ':'
+        . $userId;
+}
+
+function user_history_locations_cache_get(string $groupName, int $userId): ?array
+{
+    $redis = redis_client();
+    if (!$redis) {
+        return null;
+    }
+
+    $payload = $redis->get(user_history_locations_cache_key($groupName, $userId));
+    if (!is_string($payload) || $payload === '') {
+        return null;
+    }
+
+    $decoded = json_decode($payload, true);
+    return is_array($decoded) ? $decoded : null;
+}
+
+function user_history_locations_cache_set(string $groupName, int $userId, array $locations): void
+{
+    $redis = redis_client();
+    if (!$redis) {
+        return;
+    }
+
+    $ttl = max(1, (int) (defined('REDIS_USER_HISTORY_TTL_SECONDS') ? REDIS_USER_HISTORY_TTL_SECONDS : 86400));
+    $redis->setex(
+        user_history_locations_cache_key($groupName, $userId),
+        $ttl,
+        json_encode(array_slice($locations, 0, 20), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+    );
+}
+
+function generate_group_code(PDO $pdo): string
+{
+    $alphabet = '0123456789abcdefghijklmnopqrstuvwxyz';
+    for ($attempt = 0; $attempt < 80; $attempt += 1) {
+        $code = '';
+        for ($index = 0; $index < 6; $index += 1) {
+            $code .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        }
+
+        $stmt = $pdo->prepare('SELECT id FROM family_groups WHERE group_code = ? LIMIT 1');
+        $stmt->execute([$code]);
+        if (!$stmt->fetch()) {
+            return $code;
+        }
+    }
+
+    throw new RuntimeException('Unable to generate group code.');
+}
+
+function ensure_family_group_codes(PDO $pdo): void
+{
+    $stmt = $pdo->query("SELECT id FROM family_groups WHERE group_code IS NULL OR group_code = ''");
+    foreach ($stmt->fetchAll() as $row) {
+        $code = generate_group_code($pdo);
+        $update = $pdo->prepare('UPDATE family_groups SET group_code = ? WHERE id = ?');
+        $update->execute([$code, (int) $row['id']]);
+    }
+}
+
+function ensure_family_group_owners(PDO $pdo): void
+{
+    $stmt = $pdo->query("
+        SELECT fg.id, first_member.user_id
+        FROM family_groups fg
+        LEFT JOIN (
+            SELECT group_name, MIN(id) AS first_membership_id
+            FROM user_groups
+            GROUP BY group_name
+        ) first_link ON first_link.group_name = fg.group_name
+        LEFT JOIN user_groups first_member ON first_member.id = first_link.first_membership_id
+        WHERE fg.owner_user_id IS NULL AND first_member.user_id IS NOT NULL
+    ");
+    $update = $pdo->prepare('UPDATE family_groups SET owner_user_id = ? WHERE id = ? AND owner_user_id IS NULL');
+    foreach ($stmt->fetchAll() as $row) {
+        $update->execute([(int) $row['user_id'], (int) $row['id']]);
+    }
 }
 
 function ensure_schema(PDO $pdo): void
@@ -186,6 +288,7 @@ function ensure_schema(PDO $pdo): void
             failed_login_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
             login_locked_at DATETIME NULL,
             terms_accepted_at DATETIME NULL,
+            cross_border_transfer_accepted_at DATETIME NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_users_group_role (group_name, role)
@@ -196,6 +299,8 @@ function ensure_schema(PDO $pdo): void
         CREATE TABLE IF NOT EXISTS family_groups (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             group_name VARCHAR(100) NOT NULL UNIQUE,
+            group_code VARCHAR(6) NULL UNIQUE,
+            owner_user_id INT UNSIGNED NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -223,6 +328,7 @@ function ensure_schema(PDO $pdo): void
             role ENUM('monitor', 'guardian') NOT NULL,
             latitude DECIMAL(10, 7) NOT NULL,
             longitude DECIMAL(10, 7) NOT NULL,
+            altitude FLOAT NULL,
             accuracy FLOAT NULL,
             heading FLOAT NULL,
             speed FLOAT NULL,
@@ -243,6 +349,7 @@ function ensure_schema(PDO $pdo): void
             role ENUM('monitor', 'guardian') NOT NULL,
             latitude DECIMAL(10, 7) NOT NULL,
             longitude DECIMAL(10, 7) NOT NULL,
+            altitude FLOAT NULL,
             accuracy FLOAT NULL,
             heading FLOAT NULL,
             speed FLOAT NULL,
@@ -261,10 +368,15 @@ function ensure_schema(PDO $pdo): void
     add_column_if_missing($pdo, 'users', 'failed_login_count', 'TINYINT UNSIGNED NOT NULL DEFAULT 0');
     add_column_if_missing($pdo, 'users', 'login_locked_at', 'DATETIME NULL');
     add_column_if_missing($pdo, 'users', 'terms_accepted_at', 'DATETIME NULL');
+    add_column_if_missing($pdo, 'users', 'cross_border_transfer_accepted_at', 'DATETIME NULL');
     add_column_if_missing($pdo, 'users', 'report_interval_seconds', 'INT UNSIGNED NOT NULL DEFAULT ' . DEFAULT_REPORT_INTERVAL_SECONDS);
+    add_column_if_missing($pdo, 'family_groups', 'group_code', 'VARCHAR(6) NULL UNIQUE');
+    add_column_if_missing($pdo, 'family_groups', 'owner_user_id', 'INT UNSIGNED NULL');
+    add_column_if_missing($pdo, 'locations', 'altitude', 'FLOAT NULL');
     add_column_if_missing($pdo, 'locations', 'address_diagnostics', 'LONGTEXT NULL');
     add_column_if_missing($pdo, 'locations', 'address_mismatch', 'TINYINT(1) NOT NULL DEFAULT 0');
     add_column_if_missing($pdo, 'latest_group_locations', 'latest_location_id', 'BIGINT UNSIGNED NULL');
+    add_column_if_missing($pdo, 'latest_group_locations', 'altitude', 'FLOAT NULL');
     add_column_if_missing($pdo, 'latest_group_locations', 'address_diagnostics', 'LONGTEXT NULL');
     add_column_if_missing($pdo, 'latest_group_locations', 'address_mismatch', 'TINYINT(1) NOT NULL DEFAULT 0');
     migrate_role_columns($pdo);
@@ -289,6 +401,8 @@ function ensure_schema(PDO $pdo): void
         FROM user_groups
         WHERE group_name <> ''
     ");
+    ensure_family_group_codes($pdo);
+    ensure_family_group_owners($pdo);
 
     if (table_exists($pdo, 'latest_locations')) {
         $pdo->exec("
@@ -308,7 +422,68 @@ function ensure_schema(PDO $pdo): void
         ");
     }
 
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS announcements (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            title VARCHAR(120) NOT NULL DEFAULT '',
+            body TEXT NOT NULL,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            version INT UNSIGNED NOT NULL DEFAULT 1,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_announcements_active_updated (is_active, updated_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS invite_codes (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            code VARCHAR(64) NOT NULL UNIQUE,
+            invite_type ENUM('invite', 'group_create') NOT NULL DEFAULT 'invite',
+            max_uses INT UNSIGNED NOT NULL DEFAULT 1,
+            used_count INT UNSIGNED NOT NULL DEFAULT 0,
+            assigned_group_name VARCHAR(100) NULL,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_invite_codes_active (is_active, invite_type)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ");
+
     $done = true;
+}
+
+function ensure_family_group_record(PDO $pdo, string $groupName, ?int $ownerUserId = null): array
+{
+    $groupName = trim($groupName);
+    if ($groupName === '') {
+        throw new RuntimeException('家庭组名称不能为空。');
+    }
+
+    $stmt = $pdo->prepare('INSERT IGNORE INTO family_groups (group_name, group_code, owner_user_id) VALUES (?, ?, ?)');
+    $stmt->execute([$groupName, generate_group_code($pdo), $ownerUserId]);
+
+    $stmt = $pdo->prepare('SELECT * FROM family_groups WHERE group_name = ? LIMIT 1');
+    $stmt->execute([$groupName]);
+    $group = $stmt->fetch();
+    if (!$group) {
+        throw new RuntimeException('家庭组不存在。');
+    }
+
+    if (empty($group['group_code'])) {
+        $code = generate_group_code($pdo);
+        $update = $pdo->prepare('UPDATE family_groups SET group_code = ? WHERE id = ?');
+        $update->execute([$code, (int) $group['id']]);
+        $group['group_code'] = $code;
+    }
+
+    if ($ownerUserId !== null && empty($group['owner_user_id'])) {
+        $update = $pdo->prepare('UPDATE family_groups SET owner_user_id = ? WHERE id = ?');
+        $update->execute([$ownerUserId, (int) $group['id']]);
+        $group['owner_user_id'] = $ownerUserId;
+    }
+
+    return $group;
 }
 
 function table_exists(PDO $pdo, string $table): bool
@@ -528,16 +703,21 @@ function require_user(): array
 
 function require_terms_accepted(array $user): void
 {
-    if (user_terms_accepted($user)) {
+    if (user_terms_accepted($user) && user_cross_border_transfer_accepted($user)) {
         return;
     }
 
-    json_response(['ok' => false, 'message' => '请先同意用户协议和隐私条约。'], 403);
+    json_response(['ok' => false, 'message' => '请先同意用户协议、隐私条约和用户数据跨境加密传输协议。'], 403);
 }
 
 function user_terms_accepted(array $user): bool
 {
     return !empty($user['terms_accepted_at']);
+}
+
+function user_cross_border_transfer_accepted(array $user): bool
+{
+    return !empty($user['cross_border_transfer_accepted_at']);
 }
 
 function require_app_user_agent(): void
@@ -685,6 +865,8 @@ function group_payload(array $group): array
     return [
         'id' => (int) ($group['id'] ?? 0),
         'group_name' => $group['group_name'],
+        'group_code' => $group['group_code'] ?? '',
+        'owner_user_id' => isset($group['owner_user_id']) ? (int) $group['owner_user_id'] : 0,
         'role' => normalize_role((string) $group['role']),
         'role_label' => role_label((string) $group['role']),
     ];
@@ -711,6 +893,7 @@ function location_payload(?array $row): ?array
         'group_name' => $row['group_name'],
         'latitude' => (float) $row['latitude'],
         'longitude' => (float) $row['longitude'],
+        'altitude' => $row['altitude'] === null ? null : (float) $row['altitude'],
         'accuracy' => $row['accuracy'] === null ? null : (float) $row['accuracy'],
         'heading' => $row['heading'] === null ? null : (float) $row['heading'],
         'speed' => $row['speed'] === null ? null : (float) $row['speed'],
@@ -740,6 +923,7 @@ function public_user_payload(array $user): array
         'role' => $membership ? normalize_role((string) $membership['role']) : '',
         'role_label' => $membership ? role_label((string) $membership['role']) : '',
         'terms_accepted' => user_terms_accepted($user),
+        'cross_border_transfer_accepted' => user_cross_border_transfer_accepted($user),
         'groups' => array_map('group_payload', $groups),
         'report_interval_seconds' => user_report_interval_seconds($user),
     ];
@@ -768,10 +952,17 @@ function user_report_interval_seconds(array $user): int
 function user_groups_for_user(int $userId): array
 {
     $stmt = db()->prepare('
-        SELECT id, user_id, group_name, role
-        FROM user_groups
-        WHERE user_id = ?
-        ORDER BY group_name ASC, id ASC
+        SELECT
+            ug.id,
+            ug.user_id,
+            ug.group_name,
+            ug.role,
+            fg.group_code,
+            fg.owner_user_id
+        FROM user_groups ug
+        LEFT JOIN family_groups fg ON fg.group_name = ug.group_name
+        WHERE ug.user_id = ?
+        ORDER BY ug.group_name ASC, ug.id ASC
     ');
     $stmt->execute([$userId]);
 
@@ -889,6 +1080,7 @@ function latest_locations_for_group(string $groupName): array
             ug.role AS role,
             ll.latitude,
             ll.longitude,
+            ll.altitude,
             ll.accuracy,
             ll.heading,
             ll.speed,

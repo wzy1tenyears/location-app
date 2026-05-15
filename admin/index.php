@@ -38,8 +38,7 @@ function ensure_family_group_available(PDO $pdo, string $groupName, int $ignoreG
 
 function ensure_family_group_exists(PDO $pdo, string $groupName): void
 {
-    $stmt = $pdo->prepare('INSERT IGNORE INTO family_groups (group_name) VALUES (?)');
-    $stmt->execute([$groupName]);
+    ensure_family_group_record($pdo, $groupName);
 }
 
 function validate_role(string $role): string
@@ -162,13 +161,14 @@ function refresh_latest_location(PDO $pdo, int $userId, string $groupName): void
 
     $stmt = $pdo->prepare('
         INSERT INTO latest_group_locations
-            (user_id, group_name, role, latitude, longitude, accuracy, heading, speed, latest_location_id, address_diagnostics, address_mismatch, updated_at)
+            (user_id, group_name, role, latitude, longitude, altitude, accuracy, heading, speed, latest_location_id, address_diagnostics, address_mismatch, updated_at)
         VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             role = VALUES(role),
             latitude = VALUES(latitude),
             longitude = VALUES(longitude),
+            altitude = VALUES(altitude),
             accuracy = VALUES(accuracy),
             heading = VALUES(heading),
             speed = VALUES(speed),
@@ -183,6 +183,7 @@ function refresh_latest_location(PDO $pdo, int $userId, string $groupName): void
         (string) $row['role'],
         $row['latitude'],
         $row['longitude'],
+        $row['altitude'],
         $row['accuracy'],
         $row['heading'],
         $row['speed'],
@@ -222,9 +223,66 @@ try {
             }
 
             ensure_family_group_available($pdo, $groupName);
-            $stmt = $pdo->prepare('INSERT INTO family_groups (group_name) VALUES (?)');
-            $stmt->execute([$groupName]);
+            ensure_family_group_record($pdo, $groupName);
             $message = '家庭组已添加。';
+        }
+
+        if ($action === 'save_announcement') {
+            $title = post_string('title', 120);
+            $body = trim((string) ($_POST['body'] ?? ''));
+            $isActive = isset($_POST['is_active']) ? 1 : 0;
+
+            $stmt = $pdo->query('SELECT id FROM announcements ORDER BY id DESC LIMIT 1');
+            $announcementId = (int) ($stmt->fetchColumn() ?: 0);
+            if ($announcementId > 0) {
+                $stmt = $pdo->prepare('
+                    UPDATE announcements
+                    SET title = ?,
+                        body = ?,
+                        is_active = ?,
+                        version = version + 1
+                    WHERE id = ?
+                ');
+                $stmt->execute([$title, $body, $isActive, $announcementId]);
+            } else {
+                $stmt = $pdo->prepare('INSERT INTO announcements (title, body, is_active) VALUES (?, ?, ?)');
+                $stmt->execute([$title, $body, $isActive]);
+            }
+            $message = '公告已保存。';
+        }
+
+        if ($action === 'add_invite_code') {
+            $code = post_string('code', 64);
+            $inviteType = post_string('invite_type', 32);
+            $maxUses = max(1, (int) ($_POST['max_uses'] ?? 1));
+            if ($code === '') {
+                $alphabet = '0123456789abcdefghijklmnopqrstuvwxyz';
+                $code = '';
+                for ($index = 0; $index < 6; $index += 1) {
+                    $code .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+                }
+            }
+            if (!in_array($inviteType, ['invite', 'group_create'], true)) {
+                throw new RuntimeException('邀请码类型不正确。');
+            }
+            $stmt = $pdo->prepare('INSERT INTO invite_codes (code, invite_type, max_uses) VALUES (?, ?, ?)');
+            $stmt->execute([$code, $inviteType, $maxUses]);
+            $message = '邀请码已添加。';
+        }
+
+        if ($action === 'toggle_invite_code') {
+            $inviteId = (int) ($_POST['invite_id'] ?? 0);
+            $next = (int) ($_POST['next'] ?? 0);
+            $stmt = $pdo->prepare('UPDATE invite_codes SET is_active = ? WHERE id = ?');
+            $stmt->execute([$next === 1 ? 1 : 0, $inviteId]);
+            $message = $next === 1 ? '邀请码已启用。' : '邀请码已停用。';
+        }
+
+        if ($action === 'delete_invite_code') {
+            $inviteId = (int) ($_POST['invite_id'] ?? 0);
+            $stmt = $pdo->prepare('DELETE FROM invite_codes WHERE id = ?');
+            $stmt->execute([$inviteId]);
+            $message = '邀请码已删除。';
         }
 
         if ($action === 'update_family_group') {
@@ -387,6 +445,7 @@ try {
             ]);
 
             $userId = (int) $pdo->lastInsertId();
+            ensure_family_group_record($pdo, $groupName, $userId);
             $stmt = $pdo->prepare('INSERT INTO user_groups (user_id, group_name, role) VALUES (?, ?, ?)');
             $stmt->execute([$userId, $groupName, $role]);
 
@@ -443,6 +502,7 @@ try {
 
             $stmt = $pdo->prepare('INSERT INTO user_groups (user_id, group_name, role) VALUES (?, ?, ?)');
             $stmt->execute([$userId, $groupName, $role]);
+            ensure_family_group_record($pdo, $groupName, $userId);
             $message = '家庭组身份已添加。';
         }
 
@@ -617,15 +677,23 @@ try {
         SELECT
             fg.id,
             fg.group_name,
+            fg.group_code,
+            fg.owner_user_id,
             fg.created_at,
             fg.updated_at,
             COUNT(ug.id) AS member_count
         FROM family_groups fg
         LEFT JOIN user_groups ug ON ug.group_name = fg.group_name
-        GROUP BY fg.id, fg.group_name, fg.created_at, fg.updated_at
+        GROUP BY fg.id, fg.group_name, fg.group_code, fg.owner_user_id, fg.created_at, fg.updated_at
         ORDER BY fg.group_name ASC
     ');
     $familyGroups = $familyGroupsStmt->fetchAll();
+
+    $announcementStmt = $pdo->query('SELECT * FROM announcements ORDER BY id DESC LIMIT 1');
+    $announcement = $announcementStmt->fetch() ?: null;
+
+    $inviteCodesStmt = $pdo->query('SELECT * FROM invite_codes ORDER BY created_at DESC, id DESC');
+    $inviteCodes = $inviteCodesStmt->fetchAll();
 
     $userTotal = (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
     $userTotalPages = max(1, (int) ceil($userTotal / $userPerPage));
@@ -651,6 +719,7 @@ try {
             ug.*,
             ll.latitude,
             ll.longitude,
+            ll.altitude,
             ll.accuracy,
             ll.updated_at AS location_updated_at
         FROM user_groups ug
@@ -724,8 +793,11 @@ try {
     }
 
     $familyGroups = $familyGroups ?? [];
+    $announcement = $announcement ?? null;
+    $inviteCodes = $inviteCodes ?? [];
     $users = $users ?? [];
     $membershipsByUser = $membershipsByUser ?? [];
+    $environmentReportsByUser = $environmentReportsByUser ?? [];
     $userPage = $userPage ?? 1;
     $userPerPage = $userPerPage ?? 20;
     $userTotal = $userTotal ?? 0;
@@ -793,6 +865,89 @@ try {
 
         <div class="grid">
             <section class="panel">
+                <h2>公告管理</h2>
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="save_announcement">
+                    <div class="field">
+                        <label for="announcement_title">公告标题</label>
+                        <input id="announcement_title" name="title" value="<?= e((string) ($announcement['title'] ?? '')) ?>">
+                    </div>
+                    <div class="field">
+                        <label for="announcement_body">公告内容</label>
+                        <textarea id="announcement_body" name="body" rows="5"><?= e((string) ($announcement['body'] ?? '')) ?></textarea>
+                    </div>
+                    <label class="check-line">
+                        <input name="is_active" type="checkbox" value="1" <?= !empty($announcement['is_active']) ? 'checked' : '' ?>>
+                        <span>启用公告</span>
+                    </label>
+                    <button type="submit">保存公告</button>
+                </form>
+            </section>
+
+            <section class="panel">
+                <h2>邀请码管理</h2>
+                <form class="compact-form" method="post">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="add_invite_code">
+                    <div class="field">
+                        <label for="invite_code">邀请码</label>
+                        <input id="invite_code" name="code" placeholder="留空自动生成">
+                    </div>
+                    <div class="field">
+                        <label for="invite_type">类型</label>
+                        <select id="invite_type" name="invite_type">
+                            <option value="invite">纯邀请</option>
+                            <option value="group_create">组创建</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="invite_max_uses">可使用次数</label>
+                        <input id="invite_max_uses" name="max_uses" type="number" min="1" value="1">
+                    </div>
+                    <button type="submit">添加邀请码</button>
+                </form>
+                <div class="group-list">
+                    <?php if (!$inviteCodes): ?>
+                        <div class="muted">暂无邀请码。</div>
+                    <?php endif; ?>
+                    <?php foreach ($inviteCodes as $invite): ?>
+                        <div class="group-row">
+                            <div class="group-summary">
+                                <strong><?= e((string) $invite['code']) ?></strong>
+                                <span class="muted">
+                                    <?= ((string) $invite['invite_type'] === 'group_create') ? '组创建' : '纯邀请' ?>
+                                    · <?= (int) $invite['used_count'] ?>/<?= (int) $invite['max_uses'] ?>
+                                    · <?= ((int) $invite['is_active'] === 1) ? '启用' : '停用' ?>
+                                </span>
+                                <?php if (!empty($invite['assigned_group_name'])): ?>
+                                    <span class="muted">绑定：<?= e((string) $invite['assigned_group_name']) ?></span>
+                                <?php endif; ?>
+                            </div>
+                            <details class="row-more">
+                                <summary>更多操作</summary>
+                                <form class="inline-form" method="post">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="toggle_invite_code">
+                                    <input type="hidden" name="invite_id" value="<?= (int) $invite['id'] ?>">
+                                    <input type="hidden" name="next" value="<?= ((int) $invite['is_active'] === 1) ? 0 : 1 ?>">
+                                    <button class="small secondary" type="submit"><?= ((int) $invite['is_active'] === 1) ? '停用' : '启用' ?></button>
+                                </form>
+                                <form class="inline-form" method="post" data-confirm="确认删除这个邀请码？">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="delete_invite_code">
+                                    <input type="hidden" name="invite_id" value="<?= (int) $invite['id'] ?>">
+                                    <button class="small danger" type="submit">删除</button>
+                                </form>
+                            </details>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </section>
+        </div>
+
+        <div class="grid">
+            <section class="panel">
                 <h2>家庭组管理</h2>
                 <form class="compact-form" method="post" autocomplete="off">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -812,6 +967,7 @@ try {
                         <div class="group-row">
                             <div class="group-summary">
                                 <strong><?= e((string) $group['group_name']) ?></strong>
+                                <span class="muted">组号：<?= e((string) ($group['group_code'] ?? '')) ?></span>
                                 <span class="muted">成员：<?= (int) $group['member_count'] ?></span>
                             </div>
                             <details class="row-more">
@@ -1088,6 +1244,7 @@ try {
                     $addressSummary = location_address_summary((string) ($location['address_diagnostics'] ?? ''));
                     $diagnosticSources = location_diagnostics_sources((string) ($location['address_diagnostics'] ?? ''));
                     $coordinateText = (string) $location['latitude'] . ', ' . (string) $location['longitude'];
+                    $altitudeText = $location['altitude'] === null ? '' : (string) round((float) $location['altitude']) . 'm';
                     $accuracyText = $location['accuracy'] === null ? '未知' : (string) round((float) $location['accuracy']) . 'm';
                     $headingText = $location['heading'] === null ? '' : (string) round((float) $location['heading']) . '°';
                     $speedText = $location['speed'] === null ? '' : number_format((float) $location['speed'], 2) . ' m/s';
@@ -1122,6 +1279,12 @@ try {
                                         <span>坐标</span>
                                         <strong><?= e($coordinateText) ?></strong>
                                     </div>
+                                    <?php if ($altitudeText !== ''): ?>
+                                    <div class="history-detail-item">
+                                        <span>高度</span>
+                                        <strong><?= e($altitudeText) ?></strong>
+                                    </div>
+                                    <?php endif; ?>
                                     <div class="history-detail-item">
                                         <span>精度</span>
                                         <strong><?= e($accuracyText) ?></strong>
