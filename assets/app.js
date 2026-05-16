@@ -3025,6 +3025,41 @@ function openRegisterPopup() {
     groupCodeLabel.hidden = true;
     inputs.group_code.maxLength = 6;
 
+    function addRegisterDocumentButton(text, documentType, title) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'text-link';
+        button.textContent = text;
+        button.addEventListener('click', () => showLegalDocument(documentType, title));
+        return button;
+    }
+
+    function addRegisterAgreement(name, parts, checked = false) {
+        const label = document.createElement('label');
+        label.className = 'terms-field';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.name = name;
+        input.value = '1';
+        input.checked = checked;
+        const text = document.createElement('span');
+        parts.forEach((part) => text.append(part));
+        label.append(input, text);
+        body.append(label);
+        return input;
+    }
+
+    const registerTermsAccepted = addRegisterAgreement('terms_accepted', [
+        document.createTextNode('我已阅读并同意 '),
+        addRegisterDocumentButton('用户协议', 'user_agreement', '用户协议'),
+        document.createTextNode(' 和 '),
+        addRegisterDocumentButton('隐私条约', 'privacy_policy', '隐私条约'),
+    ], !!(el.termsAccepted && el.termsAccepted.checked));
+    const registerCrossBorderAccepted = addRegisterAgreement('cross_border_transfer_accepted', [
+        document.createTextNode('我已阅读并同意 '),
+        addRegisterDocumentButton('用户数据跨境加密传输协议', 'cross_border_transfer', '用户数据跨境加密传输协议'),
+    ], !!(el.crossBorderAccepted && el.crossBorderAccepted.checked));
+
     let registerTurnstileToken = '';
     let registerTurnstileWidgetId = null;
     const registerTurnstileBox = document.createElement('div');
@@ -3136,6 +3171,9 @@ function openRegisterPopup() {
             if (inputs.password.value !== inputs.password_confirm.value) {
                 throw new Error('两次输入的密码不一致。');
             }
+            if (!registerTermsAccepted.checked || !registerCrossBorderAccepted.checked) {
+                throw new Error('请先同意全部协议。');
+            }
             let currentInviteCheck = inviteCheck && inviteCheck.code === code ? inviteCheck : null;
             if (!currentInviteCheck) {
                 currentInviteCheck = await checkInviteCodeNow();
@@ -3160,8 +3198,8 @@ function openRegisterPopup() {
                     invite_code: code,
                     group_name: inputs.group_name.value,
                     group_code: inputs.group_code.value.trim().toLowerCase(),
-                    terms_accepted: !!(el.termsAccepted && el.termsAccepted.checked),
-                    cross_border_transfer_accepted: !!(el.crossBorderAccepted && el.crossBorderAccepted.checked),
+                    terms_accepted: registerTermsAccepted.checked,
+                    cross_border_transfer_accepted: registerCrossBorderAccepted.checked,
                     turnstile_token: registerTurnstileToken || turnstileToken(),
                 }),
             });
