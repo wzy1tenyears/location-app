@@ -253,6 +253,7 @@ try {
 
         if ($action === 'add_invite_code') {
             $code = post_string('code', 64);
+            $note = post_string('note', 120);
             $inviteType = post_string('invite_type', 32);
             $maxUses = max(1, (int) ($_POST['max_uses'] ?? 1));
             if ($code === '') {
@@ -265,9 +266,17 @@ try {
             if (!in_array($inviteType, ['invite', 'group_create'], true)) {
                 throw new RuntimeException('邀请码类型不正确。');
             }
-            $stmt = $pdo->prepare('INSERT INTO invite_codes (code, invite_type, max_uses) VALUES (?, ?, ?)');
-            $stmt->execute([$code, $inviteType, $maxUses]);
+            $stmt = $pdo->prepare('INSERT INTO invite_codes (code, note, invite_type, max_uses) VALUES (?, ?, ?, ?)');
+            $stmt->execute([$code, $note, $inviteType, $maxUses]);
             $message = '邀请码已添加。';
+        }
+
+        if ($action === 'update_invite_note') {
+            $inviteId = (int) ($_POST['invite_id'] ?? 0);
+            $note = post_string('note', 120);
+            $stmt = $pdo->prepare('UPDATE invite_codes SET note = ? WHERE id = ?');
+            $stmt->execute([$note, $inviteId]);
+            $message = '邀请码备注已保存。';
         }
 
         if ($action === 'toggle_invite_code') {
@@ -895,6 +904,10 @@ try {
                         <input id="invite_code" name="code" placeholder="留空自动生成">
                     </div>
                     <div class="field">
+                        <label for="invite_note">备注名</label>
+                        <input id="invite_note" name="note" placeholder="仅后台可见">
+                    </div>
+                    <div class="field">
                         <label for="invite_type">类型</label>
                         <select id="invite_type" name="invite_type">
                             <option value="invite">纯邀请</option>
@@ -920,12 +933,22 @@ try {
                                     · <?= (int) $invite['used_count'] ?>/<?= (int) $invite['max_uses'] ?>
                                     · <?= ((int) $invite['is_active'] === 1) ? '启用' : '停用' ?>
                                 </span>
+                                <?php if (!empty($invite['note'])): ?>
+                                    <span class="muted">备注：<?= e((string) $invite['note']) ?></span>
+                                <?php endif; ?>
                                 <?php if (!empty($invite['assigned_group_name'])): ?>
                                     <span class="muted">绑定：<?= e((string) $invite['assigned_group_name']) ?></span>
                                 <?php endif; ?>
                             </div>
                             <details class="row-more">
                                 <summary>更多操作</summary>
+                                <form class="inline-form" method="post">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <input type="hidden" name="action" value="update_invite_note">
+                                    <input type="hidden" name="invite_id" value="<?= (int) $invite['id'] ?>">
+                                    <input name="note" value="<?= e((string) ($invite['note'] ?? '')) ?>" placeholder="备注名（仅后台可见）">
+                                    <button class="small secondary" type="submit">保存备注</button>
+                                </form>
                                 <form class="inline-form" method="post">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="toggle_invite_code">

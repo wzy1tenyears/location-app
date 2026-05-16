@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS announcements (
 CREATE TABLE IF NOT EXISTS invite_codes (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     code VARCHAR(64) NOT NULL UNIQUE,
+    note VARCHAR(120) NOT NULL DEFAULT '',
     invite_type ENUM('invite', 'group_create') NOT NULL DEFAULT 'invite',
     max_uses INT UNSIGNED NOT NULL DEFAULT 1,
     used_count INT UNSIGNED NOT NULL DEFAULT 0,

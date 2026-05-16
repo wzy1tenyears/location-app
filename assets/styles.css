@@ -72,8 +72,10 @@ button:disabled {
 .login-view {
     display: grid;
     min-height: 100vh;
+    overflow-x: hidden;
     padding: 24px;
     place-items: center;
+    width: 100%;
 }
 
 .login-card {
@@ -84,6 +86,8 @@ button:disabled {
     display: grid;
     gap: 16px;
     padding: 28px;
+    justify-self: center;
+    max-width: calc(100vw - 48px);
     width: min(420px, 100%);
 }
 
@@ -142,7 +146,18 @@ label {
 }
 
 .turnstile-box {
+    overflow: hidden;
     min-height: 65px;
+}
+
+.subtle-message {
+    background: var(--subtle);
+    color: var(--muted);
+}
+
+.success-message {
+    background: #e3f2ea;
+    color: var(--primary-strong);
 }
 
 input,
@@ -501,14 +516,22 @@ select:focus {
 
 .amap-info-content,
 .amap-info-contentContainer,
+.amap-info,
 .amap-info-sharp {
     background: var(--panel) !important;
     color: var(--ink) !important;
 }
 
+.amap-info {
+    height: auto !important;
+    width: auto !important;
+}
+
 .amap-info-contentContainer {
     height: auto !important;
-    max-width: 210px !important;
+    max-width: 176px !important;
+    min-height: 0 !important;
+    width: auto !important;
 }
 
 .amap-info-content {
@@ -516,25 +539,29 @@ select:focus {
     border-radius: 8px;
     box-shadow: 0 16px 34px rgba(0, 0, 0, 0.22);
     height: auto !important;
-    max-width: 210px !important;
+    max-height: 150px !important;
+    max-width: 176px !important;
     min-width: 0 !important;
+    overflow: auto !important;
     padding: 0 !important;
+    width: auto !important;
 }
 
 .amap-popup-content {
     color: var(--ink);
+    font-size: 11px;
     line-height: 1.35;
 }
 
 .location-map-popup .leaflet-popup-content-wrapper {
-    max-width: 210px !important;
+    max-width: 176px !important;
 }
 
 .location-map-popup .leaflet-popup-content,
 .amap-popup-content {
     margin: 8px 10px !important;
-    min-width: 130px;
-    max-width: 190px;
+    min-width: 108px;
+    max-width: 156px;
 }
 
 .map-popup {
@@ -545,19 +572,19 @@ select:focus {
 }
 
 .map-popup-title {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 850;
     text-align: center;
 }
 
 .map-popup-row {
-    font-size: 12px;
+    font-size: 11px;
     text-align: center;
 }
 
 .map-popup-coord {
     border-top: 1px solid var(--line);
-    font-size: 11px;
+    font-size: 10px;
     line-height: 1.3;
     margin-top: 2px;
     overflow-wrap: anywhere;
@@ -876,7 +903,9 @@ select:focus {
     }
 
     .login-card {
+        max-width: calc(100vw - 28px);
         padding: 22px;
+        width: calc(100vw - 28px);
     }
 
     .app-header {

@@ -439,6 +439,7 @@ function ensure_schema(PDO $pdo): void
         CREATE TABLE IF NOT EXISTS invite_codes (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             code VARCHAR(64) NOT NULL UNIQUE,
+            note VARCHAR(120) NOT NULL DEFAULT '',
             invite_type ENUM('invite', 'group_create') NOT NULL DEFAULT 'invite',
             max_uses INT UNSIGNED NOT NULL DEFAULT 1,
             used_count INT UNSIGNED NOT NULL DEFAULT 0,
@@ -449,6 +450,7 @@ function ensure_schema(PDO $pdo): void
             INDEX idx_invite_codes_active (is_active, invite_type)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     ");
+    add_column_if_missing($pdo, 'invite_codes', 'note', "VARCHAR(120) NOT NULL DEFAULT ''");
 
     $done = true;
 }

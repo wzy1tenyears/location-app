@@ -381,6 +381,8 @@ function applySelectedGroup(groupName, reload = true) {
         return;
     }
 
+    closeMapPopup();
+
     const groups = userGroups();
     const group = groups.find((item) => item.group_name === groupName) || groups[0] || null;
 
@@ -1553,10 +1555,14 @@ function renderHistoryDetails(location) {
     const rows = [
         ['家庭组', location.group_name || '未知'],
         ['坐标', formatCoord(location)],
-        ['高度', location.altitude === null || location.altitude === undefined ? '未知' : `${Math.round(Number(location.altitude))}m`],
         ['精度', location.accuracy === null ? '未知' : `${Math.round(location.accuracy)}m`],
         ['地址状态', addressDiagnosticsStatusText(diagnostics)],
     ];
+
+    const altitude = Number(location.altitude);
+    if (location.altitude !== null && location.altitude !== undefined && Number.isFinite(altitude)) {
+        rows.splice(2, 0, ['高度', `${Math.round(altitude)}m`]);
+    }
 
     const heading = Number(location.heading);
     const speed = Number(location.speed);
@@ -2485,10 +2491,11 @@ function formatCoord(location) {
     const coordinates = locationDisplayCoordinates(location);
     const sourceLabel = coordinates.source ? ` / ${coordinates.source.name || '探测位置'}` : '';
     const accuracy = !coordinates.source && location.accuracy !== null ? ` / 精度 ${Math.round(location.accuracy)}m` : '';
-    const altitude = !coordinates.source && location.altitude !== null && location.altitude !== undefined
-        ? ` / 高度 ${Math.round(Number(location.altitude))}m`
+    const altitude = Number(location.altitude);
+    const altitudeText = !coordinates.source && location.altitude !== null && location.altitude !== undefined && Number.isFinite(altitude)
+        ? ` / 高度 ${Math.round(altitude)}m`
         : '';
-    return `${coordinates.latitude.toFixed(6)}, ${coordinates.longitude.toFixed(6)}${sourceLabel}${altitude}${accuracy}`;
+    return `${coordinates.latitude.toFixed(6)}, ${coordinates.longitude.toFixed(6)}${sourceLabel}${altitudeText}${accuracy}`;
 }
 
 function renderMarkers(locations) {
@@ -2626,6 +2633,16 @@ function openAmapInfoWindow(marker, html) {
 
     state.amapInfoWindow.setContent(`<div class="amap-popup-content">${html}</div>`);
     state.amapInfoWindow.open(state.map, marker.getPosition());
+}
+
+function closeMapPopup() {
+    if (state.mapProvider === 'amap' && state.amapInfoWindow && typeof state.amapInfoWindow.close === 'function') {
+        state.amapInfoWindow.close();
+    }
+
+    if (state.mapProvider === 'leaflet' && state.map && typeof state.map.closePopup === 'function') {
+        state.map.closePopup();
+    }
 }
 
 function mapPopupOptions() {
@@ -2825,6 +2842,14 @@ function openRegisterPopup() {
     groupCodeLabel.hidden = true;
     inputs.group_code.maxLength = 6;
 
+    let registerTurnstileToken = '';
+    let registerTurnstileWidgetId = null;
+    const registerTurnstileBox = document.createElement('div');
+    registerTurnstileBox.className = 'turnstile-box';
+    if (String(window.CF_TURNSTILE_SITE_KEY || '').trim()) {
+        body.append(registerTurnstileBox);
+    }
+
     const message = document.createElement('div');
     message.className = 'message';
     message.hidden = true;
@@ -2924,7 +2949,7 @@ function openRegisterPopup() {
             const username = inputs.username.value.trim();
             const code = inputs.invite_code.value.trim().toLowerCase();
             let currentInviteCheck = inviteCheck && inviteCheck.code === code ? inviteCheck : null;
-            if (!currentInviteCheck && !inviteChecking) {
+            if (!currentInviteCheck) {
                 currentInviteCheck = await checkInviteCodeNow();
             }
             if (!currentInviteCheck) {
@@ -2948,7 +2973,7 @@ function openRegisterPopup() {
                     group_code: inputs.group_code.value.trim().toLowerCase(),
                     terms_accepted: !!(el.termsAccepted && el.termsAccepted.checked),
                     cross_border_transfer_accepted: !!(el.crossBorderAccepted && el.crossBorderAccepted.checked),
-                    turnstile_token: turnstileToken(),
+                    turnstile_token: registerTurnstileToken || turnstileToken(),
                 }),
             });
             close();
@@ -2956,7 +2981,12 @@ function openRegisterPopup() {
         } catch (error) {
             message.textContent = error.message;
             message.hidden = false;
-            resetTurnstile();
+            if (registerTurnstileWidgetId !== null && window.turnstile) {
+                window.turnstile.reset(registerTurnstileWidgetId);
+                registerTurnstileToken = '';
+            } else {
+                resetTurnstile();
+            }
         } finally {
             submitButton.disabled = false;
         }
@@ -2971,6 +3001,29 @@ function openRegisterPopup() {
     overlay.append(card);
     document.body.append(overlay);
     window.requestAnimationFrame(() => overlay.classList.add('is-visible'));
+
+    function renderRegisterTurnstile() {
+        if (!String(window.CF_TURNSTILE_SITE_KEY || '').trim()) {
+            return;
+        }
+        if (!window.turnstile || typeof window.turnstile.render !== 'function') {
+            window.setTimeout(renderRegisterTurnstile, 200);
+            return;
+        }
+        if (registerTurnstileWidgetId !== null) {
+            return;
+        }
+        registerTurnstileWidgetId = window.turnstile.render(registerTurnstileBox, {
+            sitekey: window.CF_TURNSTILE_SITE_KEY,
+            callback: (token) => {
+                registerTurnstileToken = token;
+            },
+            'expired-callback': () => {
+                registerTurnstileToken = '';
+            },
+        });
+    }
+    renderRegisterTurnstile();
 }
 
 if (el.termsButton) {

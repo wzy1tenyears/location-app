@@ -11,6 +11,7 @@ $files = [
     $root . DIRECTORY_SEPARATOR . 'index.php',
     $root . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . 'config.php',
     $root . DIRECTORY_SEPARATOR . 'api' . DIRECTORY_SEPARATOR . 'legal_documents.php',
+    $root . DIRECTORY_SEPARATOR . 'api' . DIRECTORY_SEPARATOR . 'invite_check.php',
 ];
 $patterns = [
     $root . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . '*.js',

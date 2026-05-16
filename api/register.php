@@ -73,7 +73,7 @@ try {
         ensure_family_group_record($pdo, $assignedGroupName);
     } else {
         if (!preg_match('/^[0-9a-z]{6}$/', $groupCode)) {
-            json_response(['ok' => false, 'message' => '纯邀请邀请码注册时需要填写 6 位组号。'], 422);
+            json_response(['ok' => false, 'message' => '请填写 6 位家庭组号。'], 422);
         }
         $stmt = $pdo->prepare('SELECT group_name FROM family_groups WHERE group_code = ? LIMIT 1');
         $stmt->execute([$groupCode]);

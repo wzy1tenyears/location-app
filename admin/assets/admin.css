@@ -136,6 +136,10 @@ a {
     grid-template-columns: minmax(280px, 360px) 1fr;
 }
 
+.grid + .grid {
+    margin-top: 20px;
+}
+
 .panel {
     padding: 20px;
 }
@@ -276,7 +280,10 @@ option {
 }
 
 input[type="checkbox"] {
+    appearance: auto;
+    accent-color: var(--primary);
     min-height: auto;
+    padding: 0;
     width: auto;
 }
 
@@ -285,6 +292,7 @@ input[type="checkbox"] {
     display: flex;
     gap: 8px;
     margin: 0 0 12px;
+    width: fit-content;
 }
 
 input:focus,
@@ -712,6 +720,29 @@ th {
     margin-top: 8px;
     max-height: 320px;
     overflow-y: auto;
+}
+
+.device-info-list {
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.device-info-row {
+    border-top: 1px solid var(--line-soft);
+    display: grid;
+    gap: 3px;
+    padding-top: 7px;
+}
+
+.device-info-row:first-child {
+    border-top: 0;
+}
+
+.device-info-row span {
+    color: var(--muted-soft);
+    font-size: 12px;
+    overflow-wrap: anywhere;
 }
 
 .installed-app-item {
