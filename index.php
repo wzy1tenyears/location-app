@@ -85,7 +85,7 @@ $page = <<<'HTML'
                     </span>
                 </div>
                 <div id="turnstileBox" class="turnstile-box" __CF_TURNSTILE_HIDDEN__>
-                    <div class="cf-turnstile" data-sitekey="__CF_TURNSTILE_SITE_KEY_ATTR__" data-callback="onTurnstileSuccess"></div>
+                    <div class="cf-turnstile" data-sitekey="__CF_TURNSTILE_SITE_KEY_ATTR__" data-callback="onTurnstileSuccess" data-expired-callback="onTurnstileExpired" data-error-callback="onTurnstileExpired"></div>
                 </div>
                 <button type="submit">登录</button>
                 <button id="registerButton" class="subtle-button full-button" type="button">注册账号</button>

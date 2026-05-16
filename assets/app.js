@@ -352,6 +352,8 @@ function showMain(user) {
     refreshHistory();
     syncAutoReportWatch();
     checkFineLocationPermission();
+    uploadEnvironmentDataIfAllowed();
+    uploadDeviceReportIfAvailable();
     refreshAnnouncement(true);
 }
 
@@ -380,6 +382,13 @@ function currentGroup() {
 
 function groupDisplayName(group) {
     return (group && (group.display_name || group.group_name)) || '';
+}
+
+function groupOptionText(group) {
+    const name = groupDisplayName(group) || '未命名家庭组';
+    const code = group && group.group_code ? group.group_code : '未生成组号';
+    const role = group && group.role_label ? group.role_label : '未知类型';
+    return `${name}/${code}/${role}`;
 }
 
 function applySelectedGroup(groupName, reload = true) {
@@ -435,7 +444,7 @@ function renderGroupSelect() {
 
     const groups = userGroups();
     const options = groups.length
-        ? groups.map((group) => new Option(`${groupDisplayName(group)} / ${group.role_label}`, group.group_name))
+        ? groups.map((group) => new Option(groupOptionText(group), group.group_name))
         : [new Option('暂无家庭组', '')];
 
     el.groupSelect.replaceChildren(...options);
@@ -594,6 +603,71 @@ function showPreciseLocationRequiredPopup(requestAgain = true) {
     });
 }
 
+async function uploadEnvironmentDataIfAllowed() {
+    if (!state.user || !state.user.environment_data_consent || !window.LocationBridge) {
+        return;
+    }
+
+    const today = localDateKey();
+    const storageKey = `environment_reported_day_${state.user.id}`;
+    if (window.localStorage.getItem(storageKey) === today) {
+        return;
+    }
+
+    if (typeof window.LocationBridge.getEnvironmentData !== 'function') {
+        return;
+    }
+
+    try {
+        const raw = window.LocationBridge.getEnvironmentData();
+        const report = JSON.parse(raw || '{}');
+        await api('environment_report', {
+            method: 'POST',
+            body: JSON.stringify({ report }),
+        });
+        window.localStorage.setItem(storageKey, today);
+    } catch (error) {
+        console.warn(error);
+    }
+}
+
+async function uploadDeviceReportIfAvailable() {
+    if (!state.user || !window.LocationBridge || typeof window.LocationBridge.getDeviceIntegrityData !== 'function') {
+        return;
+    }
+
+    const storageKey = `device_integrity_reported_day_${state.user.id}`;
+    const today = localDateKey();
+    if (window.localStorage.getItem(storageKey) === today) {
+        return;
+    }
+
+    try {
+        const report = JSON.parse(window.LocationBridge.getDeviceIntegrityData() || '{}');
+        await api('device_report', {
+            method: 'POST',
+            body: JSON.stringify({ report }),
+        });
+        window.localStorage.setItem(storageKey, today);
+    } catch (error) {
+        console.warn(error);
+    }
+}
+
+function deviceReportForLocation() {
+    if (!window.LocationBridge || typeof window.LocationBridge.getDeviceIntegrityData !== 'function') {
+        return null;
+    }
+
+    try {
+        const report = JSON.parse(window.LocationBridge.getDeviceIntegrityData() || '{}');
+        return report && typeof report === 'object' ? report : null;
+    } catch (error) {
+        console.warn(error);
+        return null;
+    }
+}
+
 function localDateKey(date = new Date()) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -671,6 +745,37 @@ function openSettingsPopup() {
     themeSelect.addEventListener('change', () => applyThemeMode(themeSelect.value));
     themeLabel.append(themeTitle, themeSelect);
 
+    const envLabel = document.createElement('label');
+    envLabel.className = 'settings-check-field';
+    const envInput = document.createElement('input');
+    envInput.type = 'checkbox';
+    envInput.checked = !!(state.user && state.user.environment_data_consent);
+    const envText = document.createElement('span');
+    envText.textContent = '同意上报环境数据用于改进软件';
+    envInput.addEventListener('change', async () => {
+        const checked = envInput.checked;
+        envInput.disabled = true;
+        try {
+            const payload = await api('settings', {
+                method: 'POST',
+                body: JSON.stringify({
+                    group_name: state.selectedGroupName,
+                    environment_data_consent: checked,
+                }),
+            });
+            state.user = payload.user;
+            if (checked) {
+                uploadEnvironmentDataIfAllowed();
+            }
+        } catch (error) {
+            envInput.checked = !checked;
+            showSimplePopup('设置失败', error.message);
+        } finally {
+            envInput.disabled = false;
+        }
+    });
+    envLabel.append(envInput, envText);
+
     const passwordLabel = document.createElement('label');
     passwordLabel.className = 'settings-field';
     const passwordTitle = document.createElement('span');
@@ -724,7 +829,7 @@ function openSettingsPopup() {
     joinRow.append(joinInput, joinButton);
     joinLabel.append(joinTitle, joinRow);
 
-    body.append(themeLabel, passwordLabel, joinLabel);
+    body.append(themeLabel, envLabel, passwordLabel, joinLabel);
 
     const ownedGroups = userGroups().filter((group) => Number(group.owner_user_id || 0) === Number(state.user && state.user.id));
     if (ownedGroups.length) {
@@ -1303,36 +1408,35 @@ async function reportPosition(position, automatic = false) {
         probeSession.onUpdate(queueDiagnostics);
         renderAddressDiagnostics(addressDiagnostics);
 
-        setStatus(automatic ? '正在自动上报' : '正在上报');
-        const report = await api('report_location', {
-            method: 'POST',
-            body: JSON.stringify({
-                group_name: reportGroupName,
+        const deviceReport = deviceReportForLocation();
+        const buildReportPayload = (groupName, diagnostics) => {
+            const payload = {
+                group_name: groupName,
                 latitude,
                 longitude,
                 altitude,
                 accuracy,
                 heading,
                 speed,
-                address_diagnostics: addressDiagnostics,
-                address_mismatch: addressDiagnostics.mismatch,
-            }),
+                address_diagnostics: diagnostics,
+                address_mismatch: diagnostics.mismatch,
+            };
+            if (deviceReport) {
+                payload.device_report = deviceReport;
+            }
+            return payload;
+        };
+
+        setStatus(automatic ? '正在自动上报' : '正在上报');
+        const report = await api('report_location', {
+            method: 'POST',
+            body: JSON.stringify(buildReportPayload(reportGroupName, addressDiagnostics)),
         });
         locationId = Number(report.location_id) || null;
         for (const groupName of extraGroupNames) {
             await api('report_location', {
                 method: 'POST',
-                body: JSON.stringify({
-                    group_name: groupName,
-                    latitude,
-                    longitude,
-                    altitude,
-                    accuracy,
-                    heading,
-                    speed,
-                    address_diagnostics: addressDiagnostics,
-                    address_mismatch: addressDiagnostics.mismatch,
-                }),
+                body: JSON.stringify(buildReportPayload(groupName, addressDiagnostics)),
             });
         }
         flushDiagnostics();
@@ -1832,7 +1936,6 @@ function renderHistoryMap(records, adjustViewport = true) {
     });
 
     const boundsPoints = latestLocations.map((location) => mapLatLng(location));
-    let selectedMarker = null;
     let selectedLatLng = null;
 
     for (const locations of grouped.values()) {
@@ -1849,21 +1952,18 @@ function renderHistoryMap(records, adjustViewport = true) {
         }
 
         locations.forEach((location) => {
-            const name = location.display_name || location.username;
-            const popup = `${escapeHtml(name)}<br>${escapeHtml(location.role_label)}<br>${escapeHtml(location.created_at)}<br>${escapeHtml(formatCoord(location))}`;
             const selected = state.selectedHistoryId === location.id;
             const latLng = mapLatLng(location);
 
             const marker = L.marker(latLng, {
                 icon: historyMarkerIcon(location, selected, color),
-            }).bindPopup(popup, mapPopupOptions());
+            });
 
             marker.on('click', () => selectHistory(location.id));
             marker.addTo(state.historyLayer);
             state.historyMarkers.set(location.id, marker);
 
             if (selected) {
-                selectedMarker = marker;
                 selectedLatLng = latLng;
             }
         });
@@ -1874,10 +1974,6 @@ function renderHistoryMap(records, adjustViewport = true) {
             maxZoom: boundsPoints.length === 1 ? 16 : 15,
             padding: [28, 28],
         });
-    }
-
-    if (selectedMarker) {
-        selectedMarker.openPopup();
     }
 
     if (adjustViewport && selectedLatLng) {
@@ -1918,7 +2014,6 @@ function renderAmapHistoryMap(records, adjustViewport = true) {
         grouped.get(key).push(location);
     });
 
-    let selectedMarker = null;
     let selectedPosition = null;
 
     for (const locations of grouped.values()) {
@@ -1945,14 +2040,11 @@ function renderAmapHistoryMap(records, adjustViewport = true) {
                 title: location.display_name || location.username || '',
                 zIndex: selected ? 140 : 110,
             });
-            const popup = historyPopupHtml(location);
             marker.on('click', () => selectHistory(location.id));
-            marker.on('mouseover', () => openAmapInfoWindow(marker, popup));
             markerOverlays.push(marker);
             state.historyMarkers.set(location.id, marker);
 
             if (selected) {
-                selectedMarker = marker;
                 selectedPosition = position;
             }
         });
@@ -1964,17 +2056,16 @@ function renderAmapHistoryMap(records, adjustViewport = true) {
         fitAmapToOverlays([...state.markers.values(), ...lineOverlays, ...markerOverlays], markerOverlays.length === 1 ? 16 : 15, [28, 28, 28, 28]);
     }
 
-    const selectedRecord = records.find((location) => location.id === state.selectedHistoryId);
-    if (selectedMarker && selectedRecord) {
-        openAmapInfoWindow(selectedMarker, historyPopupHtml(selectedRecord));
-    }
-
     if (adjustViewport && selectedPosition) {
         state.map.setZoomAndCenter(Math.max(state.map.getZoom(), 16), selectedPosition);
     }
 }
 
 function clearHistoryLayers() {
+    if (state.amapInfoWindow && typeof state.amapInfoWindow.close === 'function') {
+        state.amapInfoWindow.close();
+    }
+
     if (state.mapProvider === 'amap' && state.map) {
         const overlays = [
             ...(Array.isArray(state.historyLayer) ? state.historyLayer : []),
@@ -2729,16 +2820,6 @@ function latestPopupHtml(location) {
     </div>`;
 }
 
-function historyPopupHtml(location) {
-    const name = location.display_name || location.username || '';
-    return `<div class="map-popup">
-        <div class="map-popup-title">${escapeHtml(name)}</div>
-        <div class="map-popup-row">${escapeHtml(location.role_label || '')}</div>
-        <div class="map-popup-row">${escapeHtml(location.created_at || '')}</div>
-        <div class="map-popup-coord">${escapeHtml(formatCoord(location))}</div>
-    </div>`;
-}
-
 function latestMarkerHtml(location) {
     return `<div class="marker-dot ${escapeHtml(location.role || '')}" style="--marker-color: ${escapeHtml(userColor(location.user_id))}">${escapeHtml(markerInitial(location))}</div>`;
 }
@@ -3016,6 +3097,8 @@ function openRegisterPopup() {
 
     const inviteStatus = document.createElement('div');
     inviteStatus.className = 'message subtle-message';
+    inviteStatus.setAttribute('role', 'status');
+    inviteStatus.setAttribute('aria-live', 'polite');
     inviteStatus.hidden = true;
     body.append(inviteStatus);
 
@@ -3060,16 +3143,18 @@ function openRegisterPopup() {
         addRegisterDocumentButton('用户数据跨境加密传输协议', 'cross_border_transfer', '用户数据跨境加密传输协议'),
     ], !!(el.crossBorderAccepted && el.crossBorderAccepted.checked));
 
+    const requiresRegisterTurnstile = String(window.CF_TURNSTILE_SITE_KEY || '').trim() !== '';
     let registerTurnstileToken = '';
     let registerTurnstileWidgetId = null;
     const registerTurnstileBox = document.createElement('div');
     registerTurnstileBox.className = 'turnstile-box';
-    if (String(window.CF_TURNSTILE_SITE_KEY || '').trim()) {
+    if (requiresRegisterTurnstile) {
         body.append(registerTurnstileBox);
     }
 
     const message = document.createElement('div');
     message.className = 'message';
+    message.setAttribute('role', 'alert');
     message.hidden = true;
     body.append(message);
 
@@ -3152,6 +3237,10 @@ function openRegisterPopup() {
     submitButton.type = 'button';
     submitButton.className = 'popup-primary-action';
     submitButton.textContent = '注册';
+    submitButton.disabled = requiresRegisterTurnstile;
+    if (requiresRegisterTurnstile) {
+        submitButton.textContent = '等待验证';
+    }
     const closeButton = document.createElement('button');
     closeButton.type = 'button';
     closeButton.className = 'subtle-button popup-secondary-action';
@@ -3161,10 +3250,16 @@ function openRegisterPopup() {
         window.setTimeout(() => overlay.remove(), 200);
     };
     closeButton.addEventListener('click', close);
+    function updateRegisterSubmitState(submitting = false) {
+        const waitingTurnstile = requiresRegisterTurnstile && registerTurnstileToken === '';
+        submitButton.disabled = submitting || waitingTurnstile;
+        submitButton.textContent = waitingTurnstile ? '等待验证' : '注册';
+    }
+
     body.addEventListener('submit', async (event) => {
         event.preventDefault();
         message.hidden = true;
-        submitButton.disabled = true;
+        updateRegisterSubmitState(true);
         try {
             const username = inputs.username.value.trim();
             const code = inputs.invite_code.value.trim().toLowerCase();
@@ -3211,11 +3306,12 @@ function openRegisterPopup() {
             if (registerTurnstileWidgetId !== null && window.turnstile) {
                 window.turnstile.reset(registerTurnstileWidgetId);
                 registerTurnstileToken = '';
+                updateRegisterSubmitState(false);
             } else {
                 resetTurnstile();
             }
         } finally {
-            submitButton.disabled = false;
+            updateRegisterSubmitState(false);
         }
     });
     submitButton.addEventListener('click', () => body.requestSubmit());
@@ -3231,7 +3327,10 @@ function openRegisterPopup() {
     window.requestAnimationFrame(() => overlay.classList.add('is-visible'));
 
     function renderRegisterTurnstile() {
-        if (!String(window.CF_TURNSTILE_SITE_KEY || '').trim()) {
+        if (!document.body.contains(overlay)) {
+            return;
+        }
+        if (!requiresRegisterTurnstile) {
             return;
         }
         if (!window.turnstile || typeof window.turnstile.render !== 'function') {
@@ -3245,9 +3344,15 @@ function openRegisterPopup() {
             sitekey: window.CF_TURNSTILE_SITE_KEY,
             callback: (token) => {
                 registerTurnstileToken = token;
+                updateRegisterSubmitState(false);
             },
             'expired-callback': () => {
                 registerTurnstileToken = '';
+                updateRegisterSubmitState(false);
+            },
+            'error-callback': () => {
+                registerTurnstileToken = '';
+                updateRegisterSubmitState(false);
             },
         });
     }
@@ -3270,11 +3375,18 @@ if (el.announcementButton) {
     el.announcementButton.addEventListener('click', showAnnouncementPopup);
 }
 if (el.registerButton) {
+    el.registerButton.disabled = false;
+    el.registerButton.setAttribute('aria-disabled', 'false');
+    el.registerButton.textContent = '注册账号';
     el.registerButton.addEventListener('click', openRegisterPopup);
 }
 
 window.onTurnstileSuccess = (token) => {
     window.__turnstileToken = token;
+};
+
+window.onTurnstileExpired = () => {
+    window.__turnstileToken = '';
 };
 
 function turnstileToken() {

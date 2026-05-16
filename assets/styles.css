@@ -22,6 +22,8 @@
     --map-bg: #dce5e1;
     --map-empty-bg: rgba(255, 255, 255, 0.92);
     --message-bg: #fae9e9;
+    --success-message-bg: #e3f2ea;
+    --success-message-ink: #094b42;
 }
 
 html,
@@ -156,8 +158,8 @@ label {
 }
 
 .success-message {
-    background: #e3f2ea;
-    color: var(--primary-strong);
+    background: var(--success-message-bg);
+    color: var(--success-message-ink);
 }
 
 input,
@@ -384,8 +386,8 @@ select:focus {
 }
 
 .message.success-message {
-    background: #e3f2ea;
-    color: var(--primary-strong);
+    background: var(--success-message-bg);
+    color: var(--success-message-ink);
 }
 
 .main-view {
@@ -1013,6 +1015,8 @@ select:focus {
         --map-bg: #18221f;
         --map-empty-bg: rgba(25, 34, 32, 0.94);
         --message-bg: #3a2225;
+        --success-message-bg: #17372d;
+        --success-message-ink: #94efd2;
     }
 
     .login-card,
@@ -1094,6 +1098,8 @@ select:focus {
     --map-bg: #dce5e1;
     --map-empty-bg: rgba(255, 255, 255, 0.92);
     --message-bg: #fae9e9;
+    --success-message-bg: #e3f2ea;
+    --success-message-ink: #094b42;
 }
 
 :root[data-theme="dark"] {
@@ -1112,6 +1118,8 @@ select:focus {
     --map-bg: #18221f;
     --map-empty-bg: rgba(25, 34, 32, 0.94);
     --message-bg: #3a2225;
+    --success-message-bg: #17372d;
+    --success-message-ink: #94efd2;
 }
 
 :root[data-theme="dark"] .leaflet-tile {
