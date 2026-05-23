@@ -51,6 +51,7 @@ $page = <<<'HTML'
             const params = new URLSearchParams(window.location.search);
             const version = serverVersion || params.get('_web_v') || localStorage.getItem('web_asset_version') || '';
             window.__WEB_ASSET_VERSION__ = version;
+            window.__APP_LOGGED_IN__ = __APP_LOGGED_IN_JSON__;
             window.AMAP_JS_API_KEY = __AMAP_JS_API_KEY_JSON__;
             window.AMAP_REVERSE_GEOCODE_KEY = __AMAP_REVERSE_GEOCODE_KEY_JSON__;
             window.CF_TURNSTILE_SITE_KEY = __CF_TURNSTILE_SITE_KEY_JSON__;
@@ -70,7 +71,7 @@ $page = <<<'HTML'
     <script>
         document.write(`<link rel="stylesheet" href="${window.__assetUrl('assets/styles.css')}">`);
     </script>
-    <script src="https://webapi.amap.com/loader.js"></script>
+    __AMAP_LOADER_SCRIPT__
 </head>
 <body>
     <main class="app-shell">
@@ -210,9 +211,11 @@ $page = $isAppLoggedIn
 echo str_replace(
     [
         '__WEB_ASSET_VERSION_JSON__',
+        '__APP_LOGGED_IN_JSON__',
         '__AMAP_JS_API_KEY_JSON__',
         '__AMAP_REVERSE_GEOCODE_KEY_JSON__',
         '__AMAP_SERVICE_PROXY_PATH_JSON__',
+        '__AMAP_LOADER_SCRIPT__',
         '__CF_TURNSTILE_SITE_KEY_JSON__',
         '__CF_TURNSTILE_SITE_KEY_ATTR__',
         '__CF_TURNSTILE_HIDDEN__',
@@ -220,9 +223,11 @@ echo str_replace(
     ],
     [
         json_encode($webAssetVersion, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
-        json_encode(AMAP_JS_API_KEY, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
-        json_encode(AMAP_REVERSE_GEOCODE_KEY, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
-        json_encode(AMAP_SERVICE_PROXY_PATH, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
+        $isAppLoggedIn ? 'true' : 'false',
+        json_encode($isAppLoggedIn ? AMAP_JS_API_KEY : '', JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
+        json_encode($isAppLoggedIn ? AMAP_REVERSE_GEOCODE_KEY : '', JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
+        json_encode($isAppLoggedIn ? AMAP_SERVICE_PROXY_PATH : '/', JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
+        $isAppLoggedIn ? '<script src="https://webapi.amap.com/loader.js"></script>' : '',
         json_encode(CF_TURNSTILE_SITE_KEY, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
         e(CF_TURNSTILE_SITE_KEY),
         trim((string) CF_TURNSTILE_SITE_KEY) === '' ? 'hidden' : '',

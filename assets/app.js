@@ -1,4 +1,4 @@
-﻿const API_BASE = 'api';
+const API_BASE = 'api';
 const THEME_STORAGE_KEY = 'theme_mode';
 const DEFAULT_REPORT_INTERVAL_MS = 300000;
 const REFRESH_MS = 15000;
@@ -1055,8 +1055,6 @@ function openSettingsPopup() {
         leaveRow.append(leaveHelp, leaveButton);
         leaveLabel.append(leaveTitle, leaveRow);
         body.append(leaveLabel);
-
-        appendHiddenP2PSettings(body, selectedGroup);
     }
 
     const ownedGroups = userGroups().filter((group) => Number(group.owner_user_id || 0) === Number(state.user && state.user.id));
@@ -1101,8 +1099,8 @@ function openSettingsPopup() {
             const membersButton = document.createElement('button');
             membersButton.type = 'button';
             membersButton.className = 'subtle-button';
-            membersButton.textContent = '成员管理';
-            membersButton.addEventListener('click', () => openGroupMembersPopup(group));
+            membersButton.textContent = '更多操作';
+            membersButton.addEventListener('click', () => openGroupMoreActionsPopup(group));
             row.append(input, button, membersButton);
             groupLabel.append(title, row);
             body.append(groupLabel);
@@ -1132,72 +1130,72 @@ function openSettingsPopup() {
     window.requestAnimationFrame(() => overlay.classList.add('is-visible'));
 }
 
-function appendHiddenP2PSettings(body, selectedGroup) {
-    if (!window.P2PLocationCrypto || typeof window.P2PLocationCrypto.settingsElement !== 'function') {
-        return;
+function openGroupMoreActionsPopup(group) {
+    const overlay = document.createElement('div');
+    overlay.className = 'popup-select-overlay';
+
+    const card = document.createElement('div');
+    card.className = 'popup-select-card popup-dialog-card';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
+
+    const heading = document.createElement('h2');
+    heading.textContent = `${groupDisplayName(group)} 更多操作`;
+
+    const body = document.createElement('div');
+    body.className = 'popup-dialog-body settings-dialog-body';
+
+    const memberButton = document.createElement('button');
+    memberButton.type = 'button';
+    memberButton.className = 'subtle-button full-button';
+    memberButton.textContent = '成员管理';
+    memberButton.addEventListener('click', () => {
+        close();
+        openGroupMembersPopup(group);
+    });
+    body.append(memberButton);
+
+    if (window.P2PLocationCrypto && typeof window.P2PLocationCrypto.settingsElement === 'function') {
+        const p2pSection = document.createElement('section');
+        p2pSection.className = 'settings-field p2p-group-settings';
+        const p2pTitle = document.createElement('span');
+        p2pTitle.textContent = '端到端加密';
+        p2pSection.append(p2pTitle, window.P2PLocationCrypto.settingsElement(group.group_name, () => {
+            refreshLocations();
+            refreshHistory();
+        }));
+        body.append(p2pSection);
+    } else {
+        const message = document.createElement('p');
+        message.className = 'settings-help';
+        message.textContent = '当前环境暂不支持端到端加密设置。';
+        body.append(message);
     }
 
-    const groups = [];
-    const seenGroups = new Set();
-    const pushGroup = (group) => {
-        if (!group || seenGroups.has(group.group_name)) {
-            return;
-        }
-        seenGroups.add(group.group_name);
-        groups.push(group);
-    };
-    pushGroup(selectedGroup);
-    userGroups()
-        .filter((group) => Number(group.owner_user_id || 0) === Number(state.user && state.user.id))
-        .forEach(pushGroup);
+    const actions = document.createElement('div');
+    actions.className = 'popup-dialog-actions';
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.textContent = '关闭';
 
-    const trigger = document.createElement('div');
-    trigger.className = 'settings-help hidden-p2p-trigger';
-    trigger.textContent = '安全状态：正常';
-    trigger.tabIndex = 0;
-    trigger.setAttribute('role', 'button');
-
-    let clickCount = 0;
-    let unlocked = false;
-    function unlock() {
-        if (unlocked) {
-            return;
-        }
-        unlocked = true;
-        trigger.hidden = true;
-        groups.forEach((group) => {
-            const section = document.createElement('div');
-            section.className = 'settings-field p2p-group-settings';
-            const title = document.createElement('span');
-            title.textContent = groupOptionText(group);
-            section.append(title, window.P2PLocationCrypto.settingsElement(group.group_name, () => {
-                refreshLocations();
-                refreshHistory();
-            }));
-            body.append(section);
-        });
-    }
-    function tick() {
-        clickCount += 1;
-        if (clickCount >= 5) {
-            unlock();
-            return;
-        }
-        window.setTimeout(() => {
-            clickCount = 0;
-        }, 1800);
+    function close() {
+        overlay.classList.remove('is-visible');
+        window.setTimeout(() => overlay.remove(), 200);
     }
 
-    trigger.addEventListener('click', tick);
-    trigger.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            tick();
+    closeButton.addEventListener('click', close);
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+            close();
         }
     });
-    body.append(trigger);
-}
 
+    actions.append(closeButton);
+    card.append(heading, body, actions);
+    overlay.append(card);
+    document.body.append(overlay);
+    window.requestAnimationFrame(() => overlay.classList.add('is-visible'));
+}
 function openActionPopup({ title, message, confirmText = '确认', danger = false, onConfirm }) {
     const overlay = document.createElement('div');
     overlay.className = 'popup-select-overlay';
