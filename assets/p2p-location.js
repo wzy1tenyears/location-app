@@ -241,37 +241,6 @@
 
         const title = document.createElement('span');
         title.textContent = '端到端加密定位';
-        const text = document.createElement('p');
-        text.className = 'settings-help';
-        text.textContent = '开启后新增定位只保存密文。开启前请先查看风险说明。';
-
-        const detailButton = document.createElement('button');
-        detailButton.type = 'button';
-        detailButton.className = 'subtle-button';
-        detailButton.textContent = '说明与风险';
-        detailButton.addEventListener('click', () => {
-            if (typeof window.showPopupDialog === 'function') {
-                window.showPopupDialog({
-                    title: '端到端加密定位说明',
-                    closeText: '我知道了',
-                    sections: [{
-                        title: '功能说明',
-                        paragraphs: [
-                            '开启后，新增定位会在用户 App 内加密后上传。服务器和后台只保存密文、账号、家庭组、时间、密钥版本等必要元数据，无法直接查看明文经纬度和地址。',
-                            '开启前已有历史定位不会自动加密。需要当前家庭组所有成员先同意并生成本地密钥，再由家庭组管理员开启；如果家庭组没有管理员，则组内任意成员可发起开启。',
-                        ],
-                    }, {
-                        title: '重要风险',
-                        paragraphs: [
-                            '私钥仅保存在当前 App 本地。删除软件、清除应用数据、系统重置、换机但未迁移本地密钥，都可能导致已加密定位数据无法解密。',
-                            '服务器没有私钥，后台也无法帮你恢复明文位置。开启前请确认组内成员理解这个后果。',
-                        ],
-                    }],
-                });
-                return;
-            }
-            alert('端到端加密开启后，服务器和后台无法解密新增定位。删除软件、清除应用数据或换机未迁移密钥后，已加密定位数据可能无法找回。');
-        });
 
         const consentLabel = document.createElement('label');
         consentLabel.className = 'settings-check-field';
@@ -313,13 +282,23 @@
         }
 
         consentInput.addEventListener('change', async () => {
+            const nextChecked = consentInput.checked;
+            if (nextChecked) {
+                consentInput.checked = false;
+                const accepted = await confirmP2PRisk();
+                if (!accepted) {
+                    return;
+                }
+                consentInput.checked = true;
+            }
+
             consentInput.disabled = true;
             try {
-                await setConsent(groupName, consentInput.checked);
+                await setConsent(groupName, nextChecked);
                 await refresh();
                 if (typeof onChange === 'function') onChange();
             } catch (error) {
-                consentInput.checked = !consentInput.checked;
+                consentInput.checked = !nextChecked;
                 statusLine.textContent = error.message;
             } finally {
                 consentInput.disabled = false;
@@ -343,9 +322,73 @@
             }
         });
 
-        wrap.append(title, text, detailButton, consentLabel, statusLine, action);
+        wrap.append(title, consentLabel, statusLine, action);
         window.setTimeout(refresh, 0);
         return wrap;
+    }
+
+    function confirmP2PRisk() {
+        return new Promise((resolve) => {
+            if (typeof document === 'undefined') {
+                resolve(true);
+                return;
+            }
+
+            const overlay = document.createElement('div');
+            overlay.className = 'popup-select-overlay';
+
+            const card = document.createElement('div');
+            card.className = 'popup-select-card popup-dialog-card';
+            card.setAttribute('role', 'dialog');
+            card.setAttribute('aria-modal', 'true');
+
+            const heading = document.createElement('h2');
+            heading.textContent = '端到端加密风险提示';
+
+            const body = document.createElement('div');
+            body.className = 'popup-dialog-body settings-dialog-body';
+            [
+                '开启后，新增定位会在用户 App 内加密后上传。服务器和后台只保存密文、账号、家庭组、时间、密钥版本等必要元数据，无法直接查看明文经纬度和地址。',
+                '开启前已有历史定位不会自动加密。需要当前家庭组所有成员先同意并生成本地密钥，再由家庭组管理员开启。',
+                '私钥仅保存在当前 App 本地。删除软件、清除应用数据、系统重置、换机但未迁移本地密钥，都可能导致已加密定位数据无法解密。',
+                '服务器没有私钥，后台也无法帮你恢复明文位置。开启前请确认组内成员理解这个后果。',
+            ].forEach((text) => {
+                const paragraph = document.createElement('p');
+                paragraph.textContent = text;
+                body.append(paragraph);
+            });
+
+            const actions = document.createElement('div');
+            actions.className = 'popup-dialog-actions';
+            const cancelButton = document.createElement('button');
+            cancelButton.type = 'button';
+            cancelButton.className = 'subtle-button popup-secondary-action';
+            cancelButton.textContent = '取消';
+            const confirmButton = document.createElement('button');
+            confirmButton.type = 'button';
+            confirmButton.className = 'popup-primary-action';
+            confirmButton.textContent = '我已了解，继续';
+
+            function close(value) {
+                overlay.classList.remove('is-visible');
+                window.setTimeout(() => overlay.remove(), 200);
+                resolve(value);
+            }
+
+            cancelButton.addEventListener('click', () => close(false));
+            confirmButton.addEventListener('click', () => close(true));
+            overlay.addEventListener('click', (event) => {
+                if (event.target === overlay) {
+                    close(false);
+                }
+            });
+
+            actions.append(cancelButton, confirmButton);
+            card.append(heading, body, actions);
+            overlay.append(card);
+            document.body.append(overlay);
+            window.requestAnimationFrame(() => overlay.classList.add('is-visible'));
+        });
     }
 
     window.P2PLocationCrypto = {

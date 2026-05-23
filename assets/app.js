@@ -1145,22 +1145,15 @@ function openGroupMoreActionsPopup(group) {
     const body = document.createElement('div');
     body.className = 'popup-dialog-body settings-dialog-body';
 
-    const memberButton = document.createElement('button');
-    memberButton.type = 'button';
-    memberButton.className = 'subtle-button full-button';
-    memberButton.textContent = '成员管理';
-    memberButton.addEventListener('click', () => {
-        close();
-        openGroupMembersPopup(group);
-    });
-    body.append(memberButton);
+    const membersTitle = document.createElement('h3');
+    membersTitle.textContent = '成员管理';
+    body.append(membersTitle);
+    appendGroupMembersList(body, group, close);
 
     if (window.P2PLocationCrypto && typeof window.P2PLocationCrypto.settingsElement === 'function') {
         const p2pSection = document.createElement('section');
         p2pSection.className = 'settings-field p2p-group-settings';
-        const p2pTitle = document.createElement('span');
-        p2pTitle.textContent = '端到端加密';
-        p2pSection.append(p2pTitle, window.P2PLocationCrypto.settingsElement(group.group_name, () => {
+        p2pSection.append(window.P2PLocationCrypto.settingsElement(group.group_name, () => {
             refreshLocations();
             refreshHistory();
         }));
@@ -1285,26 +1278,13 @@ function openLeaveGroupPopup(group, closeSettings = null) {
     });
 }
 
-function openGroupMembersPopup(group) {
+function appendGroupMembersList(container, group, closeParent = null) {
     const members = Array.isArray(group.members) ? group.members : [];
-    const overlay = document.createElement('div');
-    overlay.className = 'popup-select-overlay';
-
-    const card = document.createElement('div');
-    card.className = 'popup-select-card popup-dialog-card';
-    card.setAttribute('role', 'dialog');
-    card.setAttribute('aria-modal', 'true');
-
-    const heading = document.createElement('h2');
-    heading.textContent = `${groupDisplayName(group)} 成员`;
-
-    const body = document.createElement('div');
-    body.className = 'popup-dialog-body settings-dialog-body';
-
     if (!members.length) {
         const empty = document.createElement('p');
         empty.textContent = '当前没有可管理的成员。';
-        body.append(empty);
+        container.append(empty);
+        return;
     }
 
     members.forEach((member) => {
@@ -1335,14 +1315,31 @@ function openGroupMembersPopup(group) {
         removeButton.className = 'subtle-button danger-subtle-button';
         removeButton.textContent = '踢出';
         removeButton.disabled = isSelf;
-        removeButton.addEventListener('click', () => openRemoveMemberPopup(group, member, () => {
-            overlay.classList.remove('is-visible');
-            window.setTimeout(() => overlay.remove(), 200);
-        }));
+        removeButton.addEventListener('click', () => openRemoveMemberPopup(group, member, closeParent));
 
         actions.append(resetButton, removeButton);
         row.append(info, actions);
-        body.append(row);
+        container.append(row);
+    });
+}
+
+function openGroupMembersPopup(group) {
+    const overlay = document.createElement('div');
+    overlay.className = 'popup-select-overlay';
+
+    const card = document.createElement('div');
+    card.className = 'popup-select-card popup-dialog-card';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
+
+    const heading = document.createElement('h2');
+    heading.textContent = `${groupDisplayName(group)} 成员`;
+
+    const body = document.createElement('div');
+    body.className = 'popup-dialog-body settings-dialog-body';
+    appendGroupMembersList(body, group, () => {
+        overlay.classList.remove('is-visible');
+        window.setTimeout(() => overlay.remove(), 200);
     });
 
     const dialogActions = document.createElement('div');
