@@ -49,10 +49,17 @@
             item.setAttribute('aria-selected', option.selected ? 'true' : 'false');
 
             item.addEventListener('click', () => {
+                if (select.value === option.value) {
+                    closeOverlay(overlay);
+                    return;
+                }
+
                 select.value = option.value;
-                select.dispatchEvent(new Event('change', { bubbles: true }));
                 updateButton(select, button);
                 closeOverlay(overlay);
+                window.setTimeout(() => {
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                }, 0);
             });
             list.append(item);
         });
@@ -197,8 +204,12 @@
     }
 
     function refreshPopupSelects(root = document) {
-        root.querySelectorAll('select').forEach(enhanceSelect);
-        root.querySelectorAll('select.popup-select-native').forEach((select) => {
+        const selects = root.matches && root.matches('select')
+            ? [root]
+            : Array.from(root.querySelectorAll('select'));
+
+        selects.forEach(enhanceSelect);
+        selects.filter((select) => select.classList.contains('popup-select-native')).forEach((select) => {
             const entry = enhanced.get(select);
             if (entry) {
                 updateButton(select, entry.button);

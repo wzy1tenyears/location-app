@@ -297,9 +297,16 @@
                 action.hidden = !current.is_owner || current.enabled;
                 action.disabled = current.enabled;
                 const ready = (current.members || []).filter((member) => member.consented && member.has_public_key).length;
+                const memberCount = (current.members || []).length;
+                const allReady = memberCount > 0 && ready === memberCount;
+                action.dataset.mode = current.is_owner && !current.enabled && !consentInput.checked ? 'consent' : 'enable';
+                action.textContent = action.dataset.mode === 'consent' ? '同意并生成密钥' : '开启端到端加密';
+                if (current.is_owner && !current.enabled && consentInput.checked && !allReady) {
+                    action.disabled = true;
+                }
                 statusLine.textContent = current.enabled
                     ? `已开启，密钥版本 ${current.key_version}`
-                    : `准备状态：${ready}/${(current.members || []).length} 名成员已同意并生成密钥`;
+                    : `准备状态：${ready}/${memberCount} 名成员已同意并生成密钥`;
             } catch (error) {
                 statusLine.textContent = error.message;
             }
@@ -322,7 +329,11 @@
         action.addEventListener('click', async () => {
             action.disabled = true;
             try {
-                await enableGroup(groupName);
+                if (action.dataset.mode === 'consent') {
+                    await setConsent(groupName, true);
+                } else {
+                    await enableGroup(groupName);
+                }
                 await refresh();
                 if (typeof onChange === 'function') onChange();
             } catch (error) {

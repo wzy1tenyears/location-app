@@ -181,7 +181,8 @@ function p2p_status_payload(PDO $pdo, array $user, string $groupName): array
         'group_name' => $groupName,
         'enabled' => !empty($group['p2p_enabled_at']),
         'key_version' => (int) ($group['p2p_key_version'] ?? 0),
-        'is_owner' => empty($group['owner_user_id']) || (int) ($group['owner_user_id'] ?? 0) === (int) $user['id'],
+        'is_owner' => (int) ($group['owner_user_id'] ?? 0) > 0
+            && (int) ($group['owner_user_id'] ?? 0) === (int) $user['id'],
         'wrapped_group_key' => $userWrappedKey,
         'members' => array_map(static function (array $member): array {
             $publicKey = null;
@@ -215,7 +216,7 @@ function p2p_require_group_initiator(array $user, string $groupName): array
     }
 
     $ownerUserId = (int) ($group['owner_user_id'] ?? 0);
-    if ($ownerUserId > 0 && $ownerUserId !== (int) $user['id']) {
+    if ($ownerUserId <= 0 || $ownerUserId !== (int) $user['id']) {
         json_response(['ok' => false, 'message' => '只有家庭组管理员可以开启端到端加密。'], 403);
     }
 

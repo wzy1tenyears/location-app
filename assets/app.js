@@ -41,6 +41,8 @@ const state = {
     pendingLatestLocationFocus: false,
     backgroundedAt: 0,
     clipboardInviteChecked: false,
+    groupReloadTimer: null,
+    groupReloadToken: 0,
 };
 
 const el = {
@@ -184,9 +186,9 @@ function updateThemeChrome(mode) {
     }
 }
 
-function refreshPopupSelectControls() {
+function refreshPopupSelectControls(root = document) {
     if (typeof window.refreshPopupSelects === 'function') {
-        window.refreshPopupSelects();
+        window.refreshPopupSelects(root);
     }
 }
 
@@ -476,10 +478,27 @@ function applySelectedGroup(groupName, reload = true) {
     state.pendingLatestLocationFocus = true;
     state.lastAutoReportAt = 0;
     state.lastImmediateAutoReportKey = '';
-    clearHistoryLayers();
-    refreshLocations();
-    refreshHistory();
-    syncAutoReportWatch();
+    scheduleSelectedGroupReload();
+}
+
+function scheduleSelectedGroupReload() {
+    const token = state.groupReloadToken + 1;
+    state.groupReloadToken = token;
+    if (state.groupReloadTimer !== null) {
+        window.clearTimeout(state.groupReloadTimer);
+    }
+
+    state.groupReloadTimer = window.setTimeout(() => {
+        if (token !== state.groupReloadToken) {
+            return;
+        }
+
+        state.groupReloadTimer = null;
+        clearHistoryLayers();
+        refreshLocations();
+        refreshHistory();
+        syncAutoReportWatch();
+    }, 80);
 }
 
 function renderGroupSelect() {
@@ -492,10 +511,14 @@ function renderGroupSelect() {
         ? groups.map((group) => new Option(groupOptionText(group), group.group_name))
         : [new Option('暂无家庭组', '')];
 
-    el.groupSelect.replaceChildren(...options);
+    const signature = options.map((option) => `${option.value}:${option.textContent}`).join('|');
+    if (el.groupSelect.dataset.optionSignature !== signature) {
+        el.groupSelect.replaceChildren(...options);
+        el.groupSelect.dataset.optionSignature = signature;
+    }
     el.groupSelect.value = state.selectedGroupName;
     el.groupSelect.disabled = groups.length <= 1;
-    refreshPopupSelectControls();
+    refreshPopupSelectControls(el.groupSelect.parentElement || document);
 }
 
 function syncUserPayload(payload, preferredGroup = '') {
@@ -1114,6 +1137,20 @@ function appendHiddenP2PSettings(body, selectedGroup) {
         return;
     }
 
+    const groups = [];
+    const seenGroups = new Set();
+    const pushGroup = (group) => {
+        if (!group || seenGroups.has(group.group_name)) {
+            return;
+        }
+        seenGroups.add(group.group_name);
+        groups.push(group);
+    };
+    pushGroup(selectedGroup);
+    userGroups()
+        .filter((group) => Number(group.owner_user_id || 0) === Number(state.user && state.user.id))
+        .forEach(pushGroup);
+
     const trigger = document.createElement('div');
     trigger.className = 'settings-help hidden-p2p-trigger';
     trigger.textContent = '安全状态：正常';
@@ -1128,10 +1165,17 @@ function appendHiddenP2PSettings(body, selectedGroup) {
         }
         unlocked = true;
         trigger.hidden = true;
-        body.append(window.P2PLocationCrypto.settingsElement(selectedGroup.group_name, () => {
-            refreshLocations();
-            refreshHistory();
-        }));
+        groups.forEach((group) => {
+            const section = document.createElement('div');
+            section.className = 'settings-field p2p-group-settings';
+            const title = document.createElement('span');
+            title.textContent = groupOptionText(group);
+            section.append(title, window.P2PLocationCrypto.settingsElement(group.group_name, () => {
+                refreshLocations();
+                refreshHistory();
+            }));
+            body.append(section);
+        });
     }
     function tick() {
         clickCount += 1;
