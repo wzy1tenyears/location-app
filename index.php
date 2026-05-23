@@ -16,6 +16,7 @@ $webAssetVersion = web_asset_version(__DIR__);
 $isAppLoggedIn = !empty($_SESSION['user_id']);
 $assetScripts = $isAppLoggedIn
     ? [
+        'assets/anti-debug.js',
         'assets/geo-aliases.js',
         'assets/address-utils.js',
         'assets/ip-probe.js',
@@ -26,6 +27,7 @@ $assetScripts = $isAppLoggedIn
         'assets/app.js',
     ]
     : [
+        'assets/anti-debug.js',
         'assets/popup-select.js',
         'assets/auth.js',
     ];
