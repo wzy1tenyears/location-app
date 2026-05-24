@@ -2167,6 +2167,8 @@ async function refreshLocations() {
     }
 }
 
+let historySelectionMapFrame = 0;
+
 async function refreshHistory() {
     if (!state.user) {
         return;
@@ -2441,6 +2443,33 @@ function renderHistoryList(records) {
     );
 }
 
+function updateHistoryListSelection(previousId, nextId) {
+    if (!el.historyList) {
+        return;
+    }
+
+    const ids = [...new Set([previousId, nextId].filter((id) => id !== null && id !== undefined).map(Number))];
+    ids.forEach((id) => {
+        const item = historyItemElement(id);
+        const location = state.history.find((record) => record.id === id);
+        if (!item || !location) {
+            return;
+        }
+
+        const selected = state.selectedHistoryId === id;
+        item.classList.toggle('selected', selected);
+        item.setAttribute('aria-expanded', selected ? 'true' : 'false');
+
+        const oldDetails = Array.from(item.children).find((child) => child.classList && child.classList.contains('history-details'));
+        if (oldDetails) {
+            oldDetails.remove();
+        }
+        if (selected) {
+            item.append(renderHistoryDetails(location));
+        }
+    });
+}
+
 function renderHistoryDetails(location) {
     const details = document.createElement('div');
     details.className = 'history-details';
@@ -2538,35 +2567,52 @@ function historyDetailValue(text) {
 function toggleHistorySelection(locationId) {
     withStableHistoryScroll(locationId, () => {
         const id = Number(locationId);
-        state.selectedHistoryId = state.selectedHistoryId === id ? null : id;
-        const records = filteredHistory();
-        renderHistoryList(records);
-        updateHistorySelectionOnMap(id);
+        const previousId = state.selectedHistoryId;
+        state.selectedHistoryId = previousId === id ? null : id;
+        updateHistoryListSelection(previousId, state.selectedHistoryId);
+        scheduleHistorySelectionOnMap(previousId, state.selectedHistoryId);
     });
 }
 
 function selectHistory(locationId) {
     withStableHistoryScroll(locationId, () => {
         const id = Number(locationId);
+        const previousId = state.selectedHistoryId;
         state.selectedHistoryId = id;
-        const records = filteredHistory();
-        renderHistoryList(records);
-        updateHistorySelectionOnMap(id);
+        if (previousId !== id) {
+            updateHistoryListSelection(previousId, id);
+        }
+        scheduleHistorySelectionOnMap(previousId, id);
     });
 }
 
-function updateHistorySelectionOnMap(locationId) {
+function scheduleHistorySelectionOnMap(previousId, nextId) {
+    if (historySelectionMapFrame) {
+        window.cancelAnimationFrame(historySelectionMapFrame);
+    }
+    historySelectionMapFrame = window.requestAnimationFrame(() => {
+        historySelectionMapFrame = 0;
+        updateHistorySelectionOnMap(previousId, nextId);
+    });
+}
+
+function updateHistorySelectionOnMap(previousId, nextId) {
     if (!state.map) {
         return;
     }
 
-    const id = Number(locationId);
     if (state.selectedHistoryId && !state.historyMarkers.has(state.selectedHistoryId)) {
         renderHistoryMap(historyMapRecords(), false);
     }
 
     const records = historyMapRecords();
-    records.forEach((location) => {
+    const locationsById = new Map(records.map((location) => [location.id, location]));
+    const ids = [...new Set([previousId, nextId].filter((id) => id !== null && id !== undefined).map(Number))];
+    ids.forEach((id) => {
+        const location = locationsById.get(id);
+        if (!location) {
+            return;
+        }
         const marker = state.historyMarkers.get(location.id);
         if (!marker) {
             return;
@@ -2585,9 +2631,7 @@ function updateHistorySelectionOnMap(locationId) {
         }
     });
 
-    const selected = state.selectedHistoryId
-        ? state.history.find((location) => location.id === state.selectedHistoryId)
-        : null;
+    const selected = state.selectedHistoryId ? locationsById.get(state.selectedHistoryId) : null;
     if (selected && isDisplayableLocation(selected)) {
         if (state.mapProvider === 'amap' && typeof state.map.setZoomAndCenter === 'function') {
             state.map.setZoomAndCenter(Math.max(state.map.getZoom(), 16), mapLngLat(selected));
