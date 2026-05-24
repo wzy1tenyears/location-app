@@ -1038,7 +1038,7 @@ function openSettingsPopup() {
 
     const selectedGroup = currentGroup();
     if (selectedGroup) {
-        const leaveLabel = document.createElement('label');
+        const leaveLabel = document.createElement('section');
         leaveLabel.className = 'settings-field';
         const leaveTitle = document.createElement('span');
         leaveTitle.textContent = '当前家庭组';
@@ -1055,6 +1055,16 @@ function openSettingsPopup() {
         leaveRow.append(leaveHelp, leaveButton);
         leaveLabel.append(leaveTitle, leaveRow);
         body.append(leaveLabel);
+
+        if (window.P2PLocationCrypto && typeof window.P2PLocationCrypto.settingsElement === 'function') {
+            const p2pSection = document.createElement('section');
+            p2pSection.className = 'settings-field p2p-group-settings';
+            p2pSection.append(window.P2PLocationCrypto.settingsElement(selectedGroup.group_name, () => {
+                refreshLocations();
+                refreshHistory();
+            }));
+            body.append(p2pSection);
+        }
     }
 
     const ownedGroups = userGroups().filter((group) => Number(group.owner_user_id || 0) === Number(state.user && state.user.id));
@@ -2531,17 +2541,62 @@ function toggleHistorySelection(locationId) {
         state.selectedHistoryId = state.selectedHistoryId === id ? null : id;
         const records = filteredHistory();
         renderHistoryList(records);
-        renderHistoryMap(historyMapRecords(), true);
+        updateHistorySelectionOnMap(id);
     });
 }
 
 function selectHistory(locationId) {
     withStableHistoryScroll(locationId, () => {
-        state.selectedHistoryId = Number(locationId);
+        const id = Number(locationId);
+        state.selectedHistoryId = id;
         const records = filteredHistory();
         renderHistoryList(records);
-        renderHistoryMap(historyMapRecords(), true);
+        updateHistorySelectionOnMap(id);
     });
+}
+
+function updateHistorySelectionOnMap(locationId) {
+    if (!state.map) {
+        return;
+    }
+
+    const id = Number(locationId);
+    if (state.selectedHistoryId && !state.historyMarkers.has(state.selectedHistoryId)) {
+        renderHistoryMap(historyMapRecords(), false);
+    }
+
+    const records = historyMapRecords();
+    records.forEach((location) => {
+        const marker = state.historyMarkers.get(location.id);
+        if (!marker) {
+            return;
+        }
+        const selected = state.selectedHistoryId === location.id;
+        const color = userColor(location.user_id);
+        if (state.mapProvider === 'amap') {
+            marker.setContent(historyMarkerHtml(location, selected, color));
+            if (typeof marker.setzIndex === 'function') {
+                marker.setzIndex(selected ? 140 : 110);
+            }
+            return;
+        }
+        if (typeof marker.setIcon === 'function') {
+            marker.setIcon(historyMarkerIcon(location, selected, color));
+        }
+    });
+
+    const selected = state.selectedHistoryId
+        ? state.history.find((location) => location.id === state.selectedHistoryId)
+        : null;
+    if (selected && isDisplayableLocation(selected)) {
+        if (state.mapProvider === 'amap' && typeof state.map.setZoomAndCenter === 'function') {
+            state.map.setZoomAndCenter(Math.max(state.map.getZoom(), 16), mapLngLat(selected));
+        } else if (typeof state.map.setView === 'function') {
+            state.map.setView(mapLatLng(selected), Math.max(state.map.getZoom(), 16), {
+                animate: true,
+            });
+        }
+    }
 }
 
 function renderHistoryMessage(message) {

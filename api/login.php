@@ -99,7 +99,7 @@ try {
     $user['privacy_policy_accepted_at'] = $acceptedAt;
     $user['cross_border_transfer_accepted_at'] = $acceptedAt;
     touch_user_presence((int) $user['id'], (string) ($user['group_name'] ?? ''));
-    record_user_log((int) $user['id'], (string) ($user['group_name'] ?? ''), 'login', '用户登录');
+    record_user_log((int) $user['id'], (string) ($user['group_name'] ?? ''), 'online', '用户登录');
 
     json_response([
         'ok' => true,

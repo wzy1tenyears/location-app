@@ -396,12 +396,35 @@
         }
     }
 
+    const loginSubmitButton = el.loginForm ? el.loginForm.querySelector('button[type="submit"]') : null;
+
+    function loginTurnstileRequired() {
+        return !!String(window.CF_TURNSTILE_SITE_KEY || '').trim();
+    }
+
+    function updateLoginSubmitState() {
+        if (!loginSubmitButton) {
+            return;
+        }
+        const waiting = loginTurnstileRequired() && !turnstileToken();
+        loginSubmitButton.disabled = waiting;
+        loginSubmitButton.textContent = waiting ? '等待质询' : '登录';
+        if (el.loginMessage && waiting) {
+            el.loginMessage.textContent = '请等待质询完成。';
+            el.loginMessage.hidden = false;
+        } else if (el.loginMessage && el.loginMessage.textContent === '请等待质询完成。') {
+            el.loginMessage.hidden = true;
+        }
+    }
+
     window.onTurnstileSuccess = (token) => {
         window.__turnstileToken = token;
+        updateLoginSubmitState();
     };
 
     window.onTurnstileExpired = () => {
         window.__turnstileToken = '';
+        updateLoginSubmitState();
     };
 
     function turnstileToken() {
@@ -424,6 +447,7 @@
             console.warn(error);
         }
         window.__turnstileToken = '';
+        updateLoginSubmitState();
     }
 
     if (el.termsButton) {
@@ -446,6 +470,11 @@
         el.loginForm.addEventListener('submit', async (event) => {
             event.preventDefault();
             el.loginMessage.hidden = true;
+
+            if (loginTurnstileRequired() && !turnstileToken()) {
+                updateLoginSubmitState();
+                return;
+            }
 
             if (el.termsAccepted && !el.termsAccepted.checked) {
                 await showCombinedLegalDocuments();
@@ -494,5 +523,6 @@
         el.loginMessage.hidden = false;
     }
 
+    window.setTimeout(updateLoginSubmitState, 0);
     window.setTimeout(checkClipboardInvite, 500);
 })();

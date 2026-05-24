@@ -56,6 +56,25 @@ function membership_minutes(array $user): int
     return (int) ceil(user_report_interval_seconds($user) / 60);
 }
 
+function membership_seconds(array $user): int
+{
+    return user_report_interval_seconds($user);
+}
+
+function admin_family_group_label(array $group): string
+{
+    $name = trim((string) ($group['display_name'] ?? ''));
+    if ($name === '') {
+        $name = trim((string) ($group['group_name'] ?? ''));
+    }
+    if ($name === '') {
+        $name = '未命名家庭组';
+    }
+
+    $code = trim((string) ($group['group_code'] ?? ''));
+    return $name . ' #' . ($code === '' ? '未生成' : $code);
+}
+
 function admin_query(array $overrides = []): string
 {
     $params = array_merge($_GET, $overrides);
@@ -414,8 +433,7 @@ try {
             $displayName = post_string('display_name', 100);
             $groupName = post_string('group_name', 100);
             $role = post_string('role', 16);
-            $reportIntervalMinutes = (int) ($_POST['report_interval_minutes'] ?? 5);
-            $reportIntervalSeconds = normalize_report_interval_seconds($reportIntervalMinutes * 60);
+            $reportIntervalSeconds = normalize_report_interval_seconds((int) ($_POST['report_interval_seconds'] ?? DEFAULT_REPORT_INTERVAL_SECONDS));
 
             if ($username === '' || $password === '' || $groupName === '') {
                 throw new RuntimeException('账号、密码和初始家庭组不能为空。');
@@ -453,8 +471,7 @@ try {
             $userId = (int) ($_POST['user_id'] ?? 0);
             $username = post_string('username', 64);
             $displayName = post_string('display_name', 100);
-            $reportIntervalMinutes = (int) ($_POST['report_interval_minutes'] ?? 5);
-            $reportIntervalSeconds = normalize_report_interval_seconds($reportIntervalMinutes * 60);
+            $reportIntervalSeconds = normalize_report_interval_seconds((int) ($_POST['report_interval_seconds'] ?? DEFAULT_REPORT_INTERVAL_SECONDS));
             $debugMode = isset($_POST['debug_mode']) ? 1 : 0;
 
             if ($userId <= 0) {
@@ -707,6 +724,7 @@ try {
         }
 
         if ($message !== '') {
+            record_user_log(null, '', 'admin_' . $action, $message);
             latest_locations_cache_forget_all();
         }
     }
@@ -771,7 +789,7 @@ try {
     }
     if ($logType !== '') {
         if ($logType === 'session') {
-            $logWhere[] = "ul.event_type IN ('login', 'logout', 'online')";
+            $logWhere[] = "ul.event_type IN ('online', 'offline')";
         } else {
             $logWhere[] = 'ul.event_type = ?';
             $logParams[] = $logType;
@@ -1189,8 +1207,7 @@ try {
                         ?>
                         <div class="group-row">
                             <div class="group-summary">
-                                <strong><?= e((string) ($group['display_name'] ?: $group['group_name'])) ?></strong>
-                                <span class="muted">组号：<?= e((string) ($group['group_code'] ?? '')) ?></span>
+                                <strong><?= e(admin_family_group_label($group)) ?></strong>
                                 <span class="muted">成员：<?= (int) $group['member_count'] ?></span>
                                 <span class="muted">管理员：<?= e($ownerName) ?></span>
                             </div>
@@ -1266,8 +1283,8 @@ try {
                         </select>
                     </div>
                     <div class="field">
-                        <label for="report_interval_minutes">上报间隔（分钟）</label>
-                        <input id="report_interval_minutes" name="report_interval_minutes" type="number" min="1" max="1440" value="5" required>
+                        <label for="report_interval_seconds">上报间隔（秒）</label>
+                        <input id="report_interval_seconds" name="report_interval_seconds" type="number" min="<?= (int) MIN_REPORT_INTERVAL_SECONDS ?>" max="<?= (int) MAX_REPORT_INTERVAL_SECONDS ?>" value="<?= (int) DEFAULT_REPORT_INTERVAL_SECONDS ?>" required>
                     </div>
                     <button type="submit">添加账号</button>
                 </form>
@@ -1315,7 +1332,7 @@ try {
                             <tr>
                                 <td><?= e((string) $user['username']) ?></td>
                                 <td><?= e((string) $user['display_name']) ?></td>
-                                <td><?= membership_minutes($user) ?> 分钟</td>
+                                <td><?= membership_seconds($user) ?> 秒</td>
                                 <td>
                                     <?= ((int) $user['is_active'] === 1) ? '启用' : '停用' ?>
                                     <?php if (!empty($user['debug_mode'])): ?>
@@ -1401,8 +1418,8 @@ try {
                                                 <input name="display_name" value="<?= e((string) $user['display_name']) ?>">
                                             </label>
                                             <label>
-                                                <span>上报间隔（分钟）</span>
-                                                <input name="report_interval_minutes" type="number" min="1" max="1440" value="<?= membership_minutes($user) ?>" required>
+                                                <span>上报间隔（秒）</span>
+                                                <input name="report_interval_seconds" type="number" min="<?= (int) MIN_REPORT_INTERVAL_SECONDS ?>" max="<?= (int) MAX_REPORT_INTERVAL_SECONDS ?>" value="<?= membership_seconds($user) ?>" required>
                                             </label>
                                             <label class="check-line compact-check">
                                                 <input name="debug_mode" type="checkbox" value="1" <?= !empty($user['debug_mode']) ? 'checked' : '' ?>>
@@ -1523,7 +1540,7 @@ try {
                         <option value="">全部家庭组</option>
                         <?php foreach ($familyGroups as $group): ?>
                             <option value="<?= e((string) $group['group_name']) ?>" <?= hash_equals((string) $group['group_name'], $logGroup) ? 'selected' : '' ?>>
-                                <?= e((string) ($group['display_name'] ?: $group['group_name'])) ?>
+                                <?= e(admin_family_group_label($group)) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -1648,7 +1665,7 @@ try {
                         <option value="">全部家庭组</option>
                         <?php foreach ($familyGroups as $group): ?>
                             <option value="<?= e((string) $group['group_name']) ?>" <?= hash_equals((string) $group['group_name'], $historyGroup) ? 'selected' : '' ?>>
-                                <?= e((string) $group['group_name']) ?>
+                                <?= e(admin_family_group_label($group)) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>

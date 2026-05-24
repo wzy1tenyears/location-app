@@ -61,7 +61,8 @@ try {
     $action = trim((string) ($data['action'] ?? ''));
 
     if ($action === 'create') {
-        $membership = require_user_membership($user, selected_group_name_from_request());
+        $membership = user_membership_for_group($user, selected_group_name_from_request());
+        $ticketGroupName = $membership ? (string) $membership['group_name'] : '';
         $subject = input_string('subject', 120);
         $message = input_string('message', 2000);
         if ($subject === '' || $message === '') {
@@ -70,13 +71,13 @@ try {
 
         $pdo->beginTransaction();
         $stmt = $pdo->prepare('INSERT INTO support_tickets (user_id, group_name, subject) VALUES (?, ?, ?)');
-        $stmt->execute([(int) $user['id'], (string) $membership['group_name'], $subject]);
+        $stmt->execute([(int) $user['id'], $ticketGroupName, $subject]);
         $ticketId = (int) $pdo->lastInsertId();
         $stmt = $pdo->prepare("INSERT INTO support_ticket_messages (ticket_id, sender_type, message) VALUES (?, 'user', ?)");
         $stmt->execute([$ticketId, $message]);
         $pdo->commit();
 
-        record_user_log((int) $user['id'], (string) $membership['group_name'], 'ticket_create', $subject);
+        record_user_log((int) $user['id'], $ticketGroupName, 'ticket_create', $subject);
         json_response(['ok' => true, 'ticket_id' => $ticketId]);
     }
 
